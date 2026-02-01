@@ -28,13 +28,39 @@ logBackend('Starting VidTok Backend...');
  */
 const server = express();
 
+/**
+ * Resolves the correct Python executable path.
+ * Favors virtual environments (venv/.venv) in the project root.
+ */
+function getPythonPath() {
+    const rootDir = path.join(__dirname, '..');
+    const venvPaths = [
+        path.join(rootDir, 'venv', 'bin', 'python3'),
+        path.join(rootDir, '.venv', 'bin', 'python3'),
+        path.join(rootDir, 'venv', 'Scripts', 'python.exe'), // Windows
+        path.join(rootDir, '.venv', 'Scripts', 'python.exe'), // Windows
+    ];
+
+    for (const venvPath of venvPaths) {
+        if (fs.existsSync(venvPath)) {
+            logBackend(`Using Virtualenv Python: ${venvPath}`);
+            return `"${venvPath}"`;
+        }
+    }
+
+    logBackend('Virtualenv not found. Falling back to system python3.');
+    return 'python3';
+}
+
+const PYTHON_EXE = getPythonPath();
+
 server.get('/stream/:videoId', async (req, res) => {
     const videoId = req.params.videoId;
     logBackend(`Stream requested for: ${videoId}`);
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const pythonScript = path.join(__dirname, '../backend/streamer.py');
 
-    exec(`python3 "${pythonScript}" "${url}"`, async (error, stdout) => {
+    exec(`${PYTHON_EXE} "${pythonScript}" "${url}"`, async (error, stdout) => {
         if (error) {
             logBackend(`Python Error: ${error.message}`);
             return res.status(500).send('Error fetching stream metadata');

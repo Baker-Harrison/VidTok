@@ -34,9 +34,9 @@ npm install
 ```
 
 ### 3. Install Python Dependencies
-It is recommended to use a virtual environment:
+It is recommended to use a virtual environment named `venv` in the root directory (the app will automatically detect it):
 ```bash
-# Optional: Create and activate a venv
+# Create and activate a venv
 python3 -m venv venv
 source venv/bin/activate # On Windows use `venv\Scripts\activate`
 
