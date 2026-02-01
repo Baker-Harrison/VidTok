@@ -3,137 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VidTok</title>
+    <title>VidTok Desktop</title>
     <style>
-        * {
-            box-sizing: border-box;
-        }
+        * { box-sizing: border-box; }
         body, html {
             margin: 0;
             padding: 0;
             width: 100%;
             height: 100%;
-            background-color: #000;
+            background-color: #050505;
             color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            overflow: hidden; /* Prevent body scroll */
+            font-family: 'Inter', -apple-system, sans-serif;
+            overflow: hidden;
         }
-        #feed {
-            width: 100%;
-            height: 100%; /* Fill viewport */
-            display: flex;
-            flex-direction: column;
-            scroll-snap-type: y mandatory;
-            overflow-y: scroll;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
-        }
-        #feed::-webkit-scrollbar {
-            display: none;
-        }
-        .video-container {
-            width: 100%;
-            height: 100%; /* This is relative to #feed which is 100% of html */
-            min-height: 100vh; /* Force full height */
-            scroll-snap-align: start;
-            flex-shrink: 0; 
-            position: relative;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #000;
-            border-bottom: 1px solid #111;
-        }
-        video {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            pointer-events: none; /* Allow clicks to pass to overlay */
-        }
-        .ui-overlay {
-            position: absolute;
-            bottom: 50px;
-            left: 20px;
-            right: 80px;
-            pointer-events: none;
-            z-index: 100;
-        }
-        .ui-overlay h3 {
-            margin: 0;
-            font-size: 1.1rem;
-            font-weight: 600;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.8);
-            pointer-events: auto;
-        }
-        .side-bar {
-            position: absolute;
-            right: 15px;
-            bottom: 80px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-            z-index: 200;
-        }
-        .action-btn {
-            width: 50px;
-            height: 50px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 50%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            backdrop-filter: blur(10px);
-            font-size: 1.5rem;
-            transition: transform 0.1s ease;
-            pointer-events: auto;
-        }
-        .action-btn:hover {
-            background: rgba(255,255,255,0.2);
-        }
-        .action-btn:active {
-            transform: scale(0.9);
-        }
-        .status-layer {
-            position: absolute;
+
+        /* Onboarding Screen */
+        #onboarding {
+            position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            padding: 40px;
+            text-align: center;
+        }
+        .onboarding-card {
+            max-width: 600px;
+            background: #111;
+            padding: 40px;
+            border-radius: 20px;
+            border: 1px solid #333;
+        }
+        input {
+            width: 100%;
+            padding: 15px;
+            background: #222;
+            border: 1px solid #444;
+            border-radius: 10px;
+            color: #fff;
+            margin: 10px 0;
+            font-size: 1rem;
+        }
+        .primary-btn {
+            background: #fff;
+            color: #000;
+            padding: 15px 40px;
+            border-radius: 30px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: transform 0.2s;
+        }
+        .primary-btn:hover { transform: scale(1.05); }
+
+        /* Main Desktop View */
+        #main-view {
+            display: none;
+            width: 100%;
+            height: 100%;
+            grid-template-columns: 240px 1fr;
+        }
+        #sidebar {
+            background: #000;
+            border-right: 1px solid #111;
+            padding: 20px;
+        }
+        #content {
+            padding: 30px;
+            overflow-y: auto;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .video-card {
+            background: #111;
+            border-radius: 12px;
+            overflow: hidden;
+            transition: background 0.2s;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+        .video-card:hover {
+            background: #1a1a1a;
+            border-color: #333;
+        }
+        .thumb {
+            width: 100%;
+            aspect-ratio: 16/9;
+            background: #222;
             display: flex;
             justify-content: center;
             align-items: center;
-            z-index: 50;
         }
-        .buffering {
-            color: rgba(255,255,255,0.5);
-            font-size: 1rem;
-            text-align: center;
+        .video-info { padding: 15px; }
+        .video-info h4 { margin: 0; font-size: 0.95rem; line-height: 1.4; }
+
+        /* Full Screen Watch View */
+        #watch-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            display: none;
+            z-index: 500;
         }
-        .pulse {
-            animation: pulse 1.5s infinite;
+        #player {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
         }
-        @keyframes pulse {
-            0% { opacity: 0.3; }
-            50% { opacity: 0.7; }
-            100% { opacity: 0.3; }
+        .back-btn {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            z-index: 600;
         }
-        .error-msg {
-            padding: 20px;
-            text-align: center;
-            color: #ff4444;
-        }
+
+        .pulse { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
     </style>
 </head>
 <body>
-    <div id="feed">
-        <div class="video-container" id="initial-loader">
-            <div class="status-layer">
-                <div class="buffering pulse">VidTok is warming up...</div>
+    <!-- Onboarding -->
+    <div id="onboarding">
+        <div class="onboarding-card">
+            <h1>Welcome to VidTok</h1>
+            <p>Tell us what you love to watch. This feeds the recursive discovery algorithm.</p>
+            <input type="text" id="fav-channels" placeholder="Favorite Channels (e.g. Marques Brownlee, Veritasium)">
+            <input type="text" id="fav-topics" placeholder="Topics you love (e.g. Science, Tech, Coding, Pharmacy)">
+            <button class="primary-btn" id="finish-onboarding">Start Exploring</button>
+        </div>
+    </div>
+
+    <!-- App Content -->
+    <div id="main-view">
+        <div id="sidebar">
+            <h2 style="font-size: 1.2rem; color: #fff;">VidTok Discovery</h2>
+            <p style="color: #666; font-size: 0.8rem;">Your personalized algorithm is learning from your interest.</p>
+        </div>
+        <div id="content">
+            <h3 id="feed-title">For You</h3>
+            <div class="grid" id="video-grid">
+                <!-- Cards injected here -->
             </div>
         </div>
     </div>
+
+    <!-- Watch View -->
+    <div id="watch-overlay">
+        <button class="back-btn" id="close-watch">← Back to Feed</button>
+        <video id="player" autoplay loop></video>
+    </div>
+
     <script src="renderer.js"></script>
 </body>
 </html>

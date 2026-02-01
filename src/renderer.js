@@ -1,152 +1,95 @@
 const { ipcRenderer } = require('electron');
 
 /**
- * VidTok Renderer
+ * VidTok Desktop Engine
+ * Onboarding, Personalized Feed, and Full Screen Playback
  */
 
-const feed = document.getElementById('feed');
-let observer;
+const onboarding = document.getElementById('onboarding');
+const mainView = document.getElementById('main-view');
+const videoGrid = document.getElementById('video-grid');
+const watchOverlay = document.getElementById('watch-overlay');
+const player = document.getElementById('player');
+const closeWatch = document.getElementById('close-watch');
 
-function logStatus(msg) {
-    console.log(`[Renderer] ${msg}`);
-}
-
-/**
- * Main Video Loading & Proxy Interaction
- */
-async function loadVideoIntoContainer(videoId, title, container) {
-    logStatus(`Loading ${videoId}...`);
-    const streamProxyUrl = `http://localhost:8888/stream/${videoId}`;
-
-    // Check if already liked
-    const isLiked = await ipcRenderer.invoke('check-like', videoId);
-
-    // Pre-emptively set the UI
-    container.innerHTML = `
-        <div class="status-layer">
-            <div class="buffering pulse">Buffering...</div>
-        </div>
-        <div class="ui-overlay">
-            <h3>${title}</h3>
-        </div>
-        <div class="side-bar">
-            <div class="action-btn like-btn" style="color: ${isLiked ? '#ff4b4b' : '#fff'}">❤️</div>
-            <div class="action-btn">💬</div>
-            <div class="action-btn">🔁</div>
-        </div>
-    `;
-
-    const videoElement = document.createElement('video');
-    videoElement.src = streamProxyUrl;
-    videoElement.loop = true;
-    videoElement.autoplay = true;
-    videoElement.style.width = '100%';
-    videoElement.style.height = '100%';
-
-    videoElement.onplaying = () => {
-        const status = container.querySelector('.status-layer');
-        if (status) status.remove();
-    };
-
-    videoElement.onerror = () => {
-        container.innerHTML = `<div class="error-msg">Failed to stream video.</div>`;
-    };
-
-    container.appendChild(videoElement);
-
-    const likeBtn = container.querySelector('.like-btn');
-    likeBtn.onclick = async (e) => {
-        e.stopPropagation();
-        const newStatus = await ipcRenderer.invoke('toggle-like', videoId, { title });
-        likeBtn.style.color = newStatus ? '#ff4b4b' : '#fff';
-        
-        // If liked, trigger recommendation logic
-        if (newStatus) {
-            handleInterestTrigger(videoId, 'like');
-        }
-    };
-}
-
-async function handleInterestTrigger(videoId, type) {
-    console.log(`[Signal] ${type} for ${videoId}`);
-    const relatedVideos = await ipcRenderer.invoke('get-related-videos', videoId);
-    if (relatedVideos && !relatedVideos.error) {
-        appendVideos(relatedVideos);
+async function checkOnboarding() {
+    const prefs = await ipcRenderer.invoke('get-preferences');
+    if (prefs) {
+        showMainView(prefs);
     }
 }
 
-function appendVideos(videos) {
-    videos.forEach(video => {
-        if (document.getElementById(`v-${video.id}`)) return;
-
-        const container = document.createElement('div');
-        container.className = 'video-container';
-        container.id = `v-${video.id}`;
-        container.setAttribute('data-title', video.title);
-        container.innerHTML = `<div class="status-layer"><div class="buffering">Discovering...</div></div>`;
-        
-        feed.appendChild(container);
-        observer.observe(container);
-    });
-}
-
-async function init() {
-    logStatus('Starting Feed...');
-
-    // Keyboard Navigation
-    window.addEventListener('keydown', (e) => {
-        const activeContainer = Array.from(document.querySelectorAll('.video-container'))
-            .find(c => {
-                const rect = c.getBoundingClientRect();
-                return rect.top >= -50 && rect.top <= 50;
-            });
-
-        if (e.code === 'Space') {
-            e.preventDefault();
-            if (activeContainer) {
-                const video = activeContainer.querySelector('video');
-                if (video) {
-                    if (video.paused) video.play();
-                    else video.pause();
-                }
-            }
-        } else if (e.code === 'ArrowDown') {
-            e.preventDefault();
-            feed.scrollBy({ top: window.innerHeight, behavior: 'smooth' });
-        } else if (e.code === 'ArrowUp') {
-            e.preventDefault();
-            feed.scrollBy({ top: -window.innerHeight, behavior: 'smooth' });
-        }
-    });
-
-    observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            const videoId = entry.target.id.replace('v-', '');
-            const title = entry.target.getAttribute('data-title');
-            const video = entry.target.querySelector('video');
-
-            if (entry.isIntersecting) {
-                if (!video) {
-                    loadVideoIntoContainer(videoId, title, entry.target);
-                } else {
-                    video.play();
-                }
-            } else {
-                if (video) video.pause();
-            }
-        });
-    }, { threshold: 0.6 });
-
-    const videos = await ipcRenderer.invoke('get-trending-videos');
+document.getElementById('finish-onboarding').onclick = async () => {
+    const channels = document.getElementById('fav-channels').value.split(',').map(s => s.trim());
+    const topics = document.getElementById('fav-topics').value.split(',').map(s => s.trim());
     
-    const loader = document.getElementById('initial-loader');
-    if (loader) loader.remove();
+    if (topics.length > 0) {
+        await ipcRenderer.invoke('save-preferences', channels, topics);
+        showMainView({ channels, topics });
+    }
+};
 
-    if (videos && videos.length > 0) {
-        appendVideos(videos);
-    } else {
-        feed.innerHTML = '<div class="error-msg">No videos found. Check your YouTube API key or quota.</div>';
+async function showMainView(prefs) {
+    onboarding.style.display = 'none';
+    mainView.style.display = 'grid';
+    
+    // Load initial feed
+    const videos = await ipcRenderer.invoke('get-personalized-feed', prefs);
+    renderGrid(videos);
+}
+
+function renderGrid(videos) {
+    videoGrid.innerHTML = '';
+    videos.forEach(video => {
+        const card = document.createElement('div');
+        card.className = 'video-card';
+        card.innerHTML = `
+            <div class="thumb">
+                <span class="pulse">▶</span>
+            </div>
+            <div class="video-info">
+                <h4>${video.title}</h4>
+            </div>
+        `;
+        card.onclick = () => watchVideo(video);
+        videoGrid.appendChild(card);
+    });
+}
+
+async function watchVideo(video) {
+    watchOverlay.style.display = 'block';
+    player.src = `http://localhost:8888/stream/${video.id}`;
+    
+    // Algorithm: Fetch related content in background while user watches
+    const related = await ipcRenderer.invoke('get-related-videos', video.id);
+    if (related && !related.error) {
+        // Soft inject into the top of the grid
+        prependToGrid(related);
     }
 }
 
-init();
+function prependToGrid(videos) {
+    videos.forEach(video => {
+        if (document.getElementById(`card-${video.id}`)) return;
+        const card = document.createElement('div');
+        card.className = 'video-card';
+        card.id = `card-${video.id}`;
+        card.innerHTML = `
+            <div class="thumb"><span>New</span></div>
+            <div class="video-info">
+                <h4>${video.title}</h4>
+            </div>
+        `;
+        card.onclick = () => watchVideo(video);
+        videoGrid.insertBefore(card, videoGrid.firstChild);
+    });
+}
+
+closeWatch.onclick = () => {
+    watchOverlay.style.display = 'none';
+    player.pause();
+    player.src = "";
+};
+
+// Start
+checkOnboarding();

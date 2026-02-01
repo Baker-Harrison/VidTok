@@ -26,6 +26,20 @@ class Storage {
         });
     }
 
+    async getPreferences() {
+        return await this.db.findOne({ type: 'preferences' });
+    }
+
+    async savePreferences(channels, topics) {
+        await this.db.remove({ type: 'preferences' }, { multi: true });
+        return await this.db.insert({
+            type: 'preferences',
+            channels,
+            topics,
+            timestamp: Date.now()
+        });
+    }
+
     /**
      * Toggles a 'like' status for a video.
      * @returns {boolean} New like status

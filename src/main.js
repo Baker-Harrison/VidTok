@@ -186,6 +186,40 @@ ipcMain.handle('check-like', async (event, videoId) => {
     return await storage.isLiked(videoId);
 });
 
+ipcMain.handle('get-preferences', async () => {
+    return await storage.getPreferences();
+});
+
+ipcMain.handle('save-preferences', async (event, channels, topics) => {
+    return await storage.savePreferences(channels, topics);
+});
+
+ipcMain.handle('get-personalized-feed', async (event, prefs) => {
+    logBackend(`Fetching personalized feed for topics: ${prefs.topics.join(', ')}`);
+    try {
+        // Search for videos based on topics
+        const query = prefs.topics.join(' ');
+        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+            params: {
+                part: 'snippet',
+                q: query,
+                type: 'video',
+                maxResults: 15,
+                key: API_KEY
+            }
+        });
+
+        return response.data.items.map(item => ({
+            id: item.id.videoId,
+            title: item.snippet.title,
+            url: `https://www.youtube.com/watch?v=${item.id.videoId}`
+        }));
+    } catch (error) {
+        handleApiError(error);
+        return { error: 'Failed to fetch personalized feed' };
+    }
+});
+
 function filterAndMapVideos(items) {
     return items.filter(item => {
         const duration = item.contentDetails.duration;
