@@ -1,10 +1,5 @@
 const { ipcRenderer } = require('electron');
 
-/**
- * VidTok Desktop Engine
- * Onboarding, Personalized Feed, and Full Screen Playback
- */
-
 const onboarding = document.getElementById('onboarding');
 const mainView = document.getElementById('main-view');
 const videoGrid = document.getElementById('video-grid');
@@ -16,6 +11,7 @@ const closeWatch = document.getElementById('close-watch');
 const navForYou = document.getElementById('nav-for-you');
 const navLiked = document.getElementById('nav-liked');
 const feedTitle = document.getElementById('feed-title');
+const contentContainer = document.getElementById('content');
 
 const channelInput = document.getElementById('channel-input');
 const channelSuggestions = document.getElementById('channel-suggestions');
@@ -28,6 +24,10 @@ let selectedChannels = [];
 let selectedTopics = [];
 let debounceTimer;
 
+let nextPageToken = null;
+let isLoadingMore = false;
+let currentViewMode = 'for-you';
+
 async function checkOnboarding() {
     const prefs = await ipcRenderer.invoke('get-preferences');
     if (prefs) {
@@ -35,114 +35,6 @@ async function checkOnboarding() {
         showMainView(prefs);
     }
 }
-
-/**
- * Autocomplete for Channels
- */
-channelInput.oninput = () => {
-    clearTimeout(debounceTimer);
-    const query = channelInput.value.trim();
-    
-    if (query.length < 2) {
-        channelSuggestions.style.display = 'none';
-        return;
-    }
-
-    debounceTimer = setTimeout(async () => {
-        const results = await ipcRenderer.invoke('search-channels', query);
-        if (results && !results.error) {
-            renderSuggestions(results);
-        }
-    }, 400);
-};
-
-function renderSuggestions(channels) {
-    channelSuggestions.innerHTML = '';
-    channelSuggestions.style.display = 'block';
-
-    channels.forEach(channel => {
-        const div = document.createElement('div');
-        div.className = 'suggestion';
-        div.innerHTML = `
-            <img src="${channel.thumbnail}" />
-            <span>${channel.title}</span>
-        `;
-        div.onclick = () => {
-            addPill('channel', channel.title);
-            channelInput.value = '';
-            channelSuggestions.style.display = 'none';
-        };
-        channelSuggestions.appendChild(div);
-    });
-}
-
-/**
- * Pill Management
- */
-function addPill(type, value) {
-    if (type === 'channel' && !selectedChannels.includes(value)) {
-        selectedChannels.push(value);
-        renderPills('channel');
-    } else if (type === 'topic' && !selectedTopics.includes(value)) {
-        selectedTopics.push(value);
-        renderPills('topic');
-    }
-}
-
-function removePill(type, value) {
-    if (type === 'channel') {
-        selectedChannels = selectedChannels.filter(v => v !== value);
-        renderPills('channel');
-    } else {
-        selectedTopics = selectedTopics.filter(v => v !== value);
-        renderPills('topic');
-    }
-}
-
-function renderPills(type) {
-    const container = type === 'channel' ? channelPillsContainer : topicPillsContainer;
-    const list = type === 'channel' ? selectedChannels : selectedTopics;
-    
-    container.innerHTML = '';
-    list.forEach(val => {
-        const pill = document.createElement('div');
-        pill.className = 'pill';
-        pill.innerHTML = `
-            <span>${val}</span>
-            <span class="remove">×</span>
-        `;
-        pill.querySelector('.remove').onclick = () => removePill(type, val);
-        container.appendChild(pill);
-    });
-}
-
-channelInput.onkeydown = (e) => {
-    if (e.key === 'Enter') {
-        const val = channelInput.value.trim();
-        if (val) {
-            addPill('channel', val);
-            channelInput.value = '';
-            channelSuggestions.style.display = 'none';
-        }
-    }
-};
-
-// Close suggestions on outside click
-document.addEventListener('click', (e) => {
-    if (e.target !== channelInput) {
-        channelSuggestions.style.display = 'none';
-    }
-});
-
-topicInput.onkeydown = (e) => {
-    if (e.key === 'Enter') {
-        const val = topicInput.value.trim();
-        if (val) {
-            addPill('topic', val);
-            topicInput.value = '';
-        }
-    }
-};
 
 document.getElementById('finish-onboarding').onclick = async () => {
     if (selectedTopics.length > 0 || selectedChannels.length > 0) {
@@ -158,73 +50,50 @@ async function showMainView(prefs) {
     loadForYou();
 }
 
-async function loadForYou() {
-    feedTitle.innerText = "For You";
+async function loadForYou(append = false) {
+    if (isLoadingMore) return;
+    isLoadingMore = true;
+    currentViewMode = 'for-you';
     updateNavUI('for-you');
-    const videos = await ipcRenderer.invoke('get-personalized-feed', currentPrefs);
-    renderGrid(videos);
+    
+    const result = await ipcRenderer.invoke('get-personalized-feed', currentPrefs, append ? nextPageToken : null);
+    
+    if (result.error) {
+        if (!append) videoGrid.innerHTML = `<div class="error-msg">${result.error}</div>`;
+    } else {
+        nextPageToken = result.nextPageToken;
+        renderGrid(result.videos, append);
+    }
+    isLoadingMore = false;
 }
 
 async function loadLiked() {
+    currentViewMode = 'liked';
     feedTitle.innerText = "Liked Videos";
     updateNavUI('liked');
-    const likes = await ipcRenderer.invoke('get-likes');
-    // Map database likes to feed format
-    const videos = likes.map(l => ({
+    const videos = await ipcRenderer.invoke('get-likes');
+    renderGrid(videos.map(l => ({
         id: l.videoId,
-        title: l.title || "Liked Video",
-        url: `https://www.youtube.com/watch?v=${l.videoId}`
-    }));
-    renderGrid(videos);
+        title: l.title,
+        thumbnail: l.thumbnail,
+        duration: l.duration,
+        views: l.views
+    })), false);
 }
 
-function updateNavUI(activeId) {
-    navForYou.classList.toggle('active', activeId === 'for-you');
-    navLiked.classList.toggle('active', activeId === 'liked');
-    
-    // Explicitly reset colors if needed, but the CSS class handles it now
-    navForYou.style.color = activeId === 'for-you' ? '#fff' : '#666';
-    navLiked.style.color = activeId === 'liked' ? '#fff' : '#666';
-}
-
-navForYou.onclick = loadForYou;
-navLiked.onclick = loadLiked;
-
-function playNextInGrid(currentId) {
-    const cards = Array.from(videoGrid.querySelectorAll('.video-card'));
-    const currentIndex = cards.findIndex(c => c.id === `card-${currentId}` || c.getAttribute('data-id') === currentId);
-    
-    if (currentIndex !== -1 && currentIndex < cards.length - 1) {
-        const nextCard = cards[currentIndex + 1];
-        nextCard.click();
-    } else {
-        logStatus('Reached end of feed.');
-        closeWatch.click();
-    }
-}
-
-function renderGrid(videos) {
-    if (!videos || videos.length === 0) {
-        videoGrid.innerHTML = '<div class="error-msg">No videos found. Try adding more topics in Onboarding.</div>';
-        return;
-    }
-    videoGrid.innerHTML = '';
+function renderGrid(videos, append = false) {
+    if (!append) videoGrid.innerHTML = '';
     videos.forEach(video => {
         const card = document.createElement('div');
         card.className = 'video-card';
         card.id = `card-${video.id}`;
-        card.setAttribute('data-id', video.id);
-        
-        // Redundancy: Thumbnail fallback
-        const thumbUrl = video.thumbnail || 'https://via.placeholder.com/1280x720/111/fff?text=No+Thumbnail';
-        
         card.innerHTML = `
-            <div class="thumb" style="background-image: url('${thumbUrl}'); background-size: cover; background-position: center;">
+            <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover;">
                 <span class="duration-badge">${video.duration || '0:00'}</span>
             </div>
             <div class="video-info">
-                <h4>${video.title || 'Untitled Video'}</h4>
-                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views || 'Unknown'} views</p>
+                <h4>${video.title}</h4>
+                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views || ''}</p>
             </div>
         `;
         card.onclick = () => watchVideo(video);
@@ -232,87 +101,84 @@ function renderGrid(videos) {
     });
 }
 
-function watchVideo(video) {
+async function watchVideo(video) {
     watchOverlay.style.display = 'block';
     player.src = `http://localhost:8888/stream/${video.id}`;
-    
-    // Auto-next logic
-    player.onended = () => {
-        logStatus('Video ended, playing next...');
-        playNextInGrid(video.id);
-    };
-
-    // Update progress bar
     player.ontimeupdate = () => {
-        const percent = (player.currentTime / player.duration) * 100;
-        progressBar.style.width = `${percent}%`;
+        progressBar.style.width = `${(player.currentTime / player.duration) * 100}%`;
     };
-
-    // Seek on progress bar click
-    progressContainer.onclick = (e) => {
-        const rect = progressContainer.getBoundingClientRect();
-        const pos = (e.clientX - rect.left) / rect.width;
-        player.currentTime = pos * player.duration;
-    };
-
-    // Play/Pause on click
-    player.onclick = () => {
-        if (player.paused) player.play();
-        else player.pause();
-    };
-
-    // Algorithm: Fetch related content in background while user watches
-    const related = await ipcRenderer.invoke('get-related-videos', video.id);
-    if (related && !related.error) {
-        // Soft inject into the top of the grid
-        prependToGrid(related);
-    }
 }
 
-function prependToGrid(videos) {
-    videos.forEach(video => {
-        if (document.getElementById(`card-${video.id}`)) return;
-        const card = document.createElement('div');
-        card.className = 'video-card';
-        card.id = `card-${video.id}`;
-        card.innerHTML = `
-            <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover; background-position: center;">
-                <span class="duration-badge">${video.duration}</span>
-            </div>
-            <div class="video-info">
-                <h4>${video.title}</h4>
-                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views}</p>
-            </div>
-        `;
-        card.onclick = () => watchVideo(video);
-        videoGrid.insertBefore(card, videoGrid.firstChild);
+// Infinite Scroll Detection
+contentContainer.onscroll = () => {
+    if (currentViewMode !== 'for-you') return;
+    const { scrollTop, scrollHeight, clientHeight } = contentContainer;
+    if (scrollTop + clientHeight >= scrollHeight - 100) {
+        loadForYou(true);
+    }
+};
+
+function updateNavUI(activeId) {
+    navForYou.classList.toggle('active', activeId === 'for-you');
+    navLiked.classList.toggle('active', activeId === 'liked');
+}
+
+navForYou.onclick = () => { nextPageToken = null; loadForYou(); };
+navLiked.onclick = loadLiked;
+closeWatch.onclick = () => { watchOverlay.style.display = 'none'; player.pause(); player.src = ""; };
+
+// Channel Autocomplete
+channelInput.oninput = () => {
+    const q = channelInput.value.trim();
+    if (q.length < 2) return;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+        const res = await ipcRenderer.invoke('search-channels', q);
+        if (res && !res.error) renderSuggestions(res);
+    }, 400);
+};
+
+function renderSuggestions(list) {
+    channelSuggestions.innerHTML = '';
+    channelSuggestions.style.display = 'block';
+    list.forEach(c => {
+        const d = document.createElement('div');
+        d.className = 'suggestion';
+        d.innerHTML = `<img src="${c.thumbnail}" /><span>${c.title}</span>`;
+        d.onclick = () => { addPill('channel', c.title); channelInput.value = ''; channelSuggestions.style.display = 'none'; };
+        channelSuggestions.appendChild(d);
     });
 }
 
-closeWatch.onclick = () => {
-    watchOverlay.style.display = 'none';
-    player.pause();
-    player.src = "";
-};
+function addPill(type, val) {
+    const list = type === 'channel' ? selectedChannels : selectedTopics;
+    if (!list.includes(val)) { list.push(val); renderPills(type); }
+}
 
-// Keyboard Shortcuts
+function renderPills(type) {
+    const cont = type === 'channel' ? channelPillsContainer : topicPillsContainer;
+    const list = type === 'channel' ? selectedChannels : selectedTopics;
+    cont.innerHTML = '';
+    list.forEach(v => {
+        const p = document.createElement('div');
+        p.className = 'pill';
+        p.innerHTML = `<span>${v}</span><span class="remove">×</span>`;
+        p.querySelector('.remove').onclick = () => {
+            if (type === 'channel') selectedChannels = selectedChannels.filter(x => x !== v);
+            else selectedTopics = selectedTopics.filter(x => x !== v);
+            renderPills(type);
+        };
+        cont.appendChild(p);
+    });
+}
+
+topicInput.onkeydown = (e) => { if (e.key === 'Enter' && topicInput.value) { addPill('topic', topicInput.value); topicInput.value = ''; } };
 window.addEventListener('keydown', (e) => {
-    if (e.code === 'Escape') {
-        if (watchOverlay.style.display === 'block') {
-            closeWatch.click();
-        }
-    } else if (e.code === 'Space') {
-        if (watchOverlay.style.display === 'block') {
-            e.preventDefault();
-            if (player.paused) player.play();
-            else player.pause();
-        }
-    } else if (e.code === 'KeyM') {
-        if (watchOverlay.style.display === 'block') {
-            player.muted = !player.muted;
-        }
+    if (e.code === 'Escape') closeWatch.click();
+    else if (e.code === 'Space' && watchOverlay.style.display === 'block') {
+        e.preventDefault();
+        player.paused ? player.play() : player.pause();
     }
 });
 
-// Start
 checkOnboarding();
