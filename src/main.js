@@ -9,71 +9,84 @@ require('dotenv').config();
 const API_KEY = process.env.YOUTUBE_API_KEY;
 const STREAM_PORT = 8888;
 const TEMP_DIR = path.join(app.getPath('temp'), 'vidtok_cache');
+const LOG_FILE = path.join(TEMP_DIR, 'backend.log');
 
-// Ensure temp directory exists
 if (!fs.existsSync(TEMP_DIR)) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
+function logBackend(msg) {
+    const entry = `[${new Date().toISOString()}] ${msg}\n`;
+    fs.appendFileSync(LOG_FILE, entry);
+    console.log(msg);
+}
+
+logBackend('Starting VidTok Backend...');
+
 /**
  * Local Streaming Server
- * Acts as a proxy to allow Spotify-style "stream-while-downloading"
  */
 const server = express();
 
 server.get('/stream/:videoId', async (req, res) => {
     const videoId = req.params.videoId;
+    logBackend(`Stream requested for: ${videoId}`);
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const pythonScript = path.join(__dirname, '../backend/streamer.py');
 
     exec(`python3 "${pythonScript}" "${url}"`, async (error, stdout) => {
         if (error) {
+            logBackend(`Python Error: ${error.message}`);
             return res.status(500).send('Error fetching stream metadata');
         }
 
         try {
             const metadata = JSON.parse(stdout);
-            if (metadata.error) return res.status(404).send(metadata.error);
+            if (metadata.error) {
+                logBackend(`Metadata Error: ${metadata.error}`);
+                return res.status(404).send(metadata.error);
+            }
 
             const streamUrl = metadata.stream_url;
-            const filePath = path.join(TEMP_DIR, `${videoId}.mp4`);
+            logBackend(`Proxied Stream URL obtained for ${videoId}`);
 
-            // Start proxying the stream
             const response = await axios({
                 method: 'get',
                 url: streamUrl,
-                responseType: 'stream'
+                responseType: 'stream',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+                }
             });
 
-            // Set headers for video playback
             res.setHeader('Content-Type', 'video/mp4');
-            res.setHeader('Content-Length', metadata.filesize);
+            if (metadata.filesize) res.setHeader('Content-Length', metadata.filesize);
 
-            // Double pipe: To browser AND to local file
-            const fileStream = fs.createWriteStream(filePath);
-            response.data.pipe(res); // Stream to user (instant playback)
-            response.data.pipe(fileStream); // Download to disk
+            response.data.pipe(res);
+            logBackend(`Streaming started for ${videoId}`);
 
-            req.on('close', () => {
-                fileStream.end();
-            });
+            // Background download
+            const filePath = path.join(TEMP_DIR, `${videoId}.mp4`);
+            if (!fs.existsSync(filePath)) {
+                const fileStream = fs.createWriteStream(filePath);
+                response.data.pipe(fileStream);
+                fileStream.on('finish', () => logBackend(`Download complete for ${videoId}`));
+            }
 
         } catch (e) {
+            logBackend(`Proxy Error: ${e.message}`);
             res.status(500).send('Streaming logic failed');
         }
     });
 });
 
 server.listen(STREAM_PORT, () => {
-    console.log(`Streaming proxy active on port ${STREAM_PORT}`);
+    logBackend(`Streaming proxy active on port ${STREAM_PORT}`);
 });
 
-/**
- * Electron Lifecycle
- */
 function createWindow() {
     const win = new BrowserWindow({
-        width: 1200,
+        width: 450, // TikTok-like aspect ratio
         height: 800,
         webPreferences: {
             nodeIntegration: true,
@@ -87,10 +100,6 @@ function createWindow() {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-    // Cleanup temp files on exit
-    if (fs.existsSync(TEMP_DIR)) {
-        fs.rmSync(TEMP_DIR, { recursive: true, force: true });
-    }
     if (process.platform !== 'darwin') app.quit();
 });
 
@@ -98,6 +107,7 @@ app.on('window-all-closed', () => {
  * IPC Handlers
  */
 ipcMain.handle('get-trending-videos', async () => {
+    logBackend('Fetching trending videos...');
     try {
         const response = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
             params: {
@@ -110,12 +120,13 @@ ipcMain.handle('get-trending-videos', async () => {
         });
         return filterAndMapVideos(response.data.items);
     } catch (error) {
-        handleApiError(error);
+        logBackend(`YouTube List Error: ${error.message}`);
         return { error: 'Failed to fetch trending videos' };
     }
 });
 
 ipcMain.handle('get-related-videos', async (event, videoId) => {
+    logBackend(`Fetching related for ${videoId}...`);
     try {
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
             params: {
@@ -132,7 +143,7 @@ ipcMain.handle('get-related-videos', async (event, videoId) => {
             url: `https://www.youtube.com/watch?v=${item.id.videoId}`
         }));
     } catch (error) {
-        handleApiError(error);
+        logBackend(`YouTube Related Error: ${error.message}`);
         return { error: 'Failed to fetch related videos' };
     }
 });
@@ -147,9 +158,4 @@ function filterAndMapVideos(items) {
         title: item.snippet.title,
         url: `https://www.youtube.com/watch?v=${item.id}`
     })).slice(0, 10);
-}
-
-function handleApiError(error) {
-    const details = error.response ? error.response.data : error.message;
-    console.error('YouTube API Error:', details);
 }
