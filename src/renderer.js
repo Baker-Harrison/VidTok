@@ -26,7 +26,12 @@ async function downloadAndPlay(url, container) {
                     <div class="ui-overlay">
                         <h3>${result.title}</h3>
                     </div>
-                    <video src="file://${videoPath}" autoplay loop muted controls></video>
+                    <div class="side-bar">
+                        <div class="action-btn">❤️</div>
+                        <div class="action-btn">💬</div>
+                        <div class="action-btn">🔁</div>
+                    </div>
+                    <video src="file://${videoPath}" autoplay loop controls></video>
                 `;
                 
                 // Store path to delete later
@@ -40,23 +45,63 @@ async function downloadAndPlay(url, container) {
 }
 
 async function loadFeed() {
-    // Mocking YouTube API results for now
-    const videoUrls = [
-        'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-        'https://www.youtube.com/watch?v=9bZkp7q19f0'
-    ];
+    console.log('Fetching real feed from YouTube...');
+    const videos = await ipcRenderer.invoke('get-trending-videos');
+    
+    if (videos.error) {
+        feed.innerHTML = `<p>Error loading feed: ${videos.error}</p>`;
+        return;
+    }
 
     feed.innerHTML = '';
-    videoUrls.forEach((url, index) => {
+    videos.forEach((video, index) => {
         const container = document.createElement('div');
         container.className = 'video-container';
-        container.id = `v-${index}`;
-        container.innerHTML = `<p>Loading Video ${index + 1}...</p>`;
+        container.id = `v-${video.id}`;
+        container.innerHTML = `
+            <div class="ui-overlay">
+                <h3>${video.title}</h3>
+            </div>
+            <p>Buffering ${video.title}...</p>
+        `;
         feed.appendChild(container);
         
-        // In a real app, we'd only load the current and next few
-        downloadAndPlay(url, container);
+        // Start download/stream for the first video immediately
+        if (index === 0) {
+            downloadAndPlay(video.url, container);
+        }
     });
+
+    // Observer to trigger download when scrolling to a new video
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const videoId = entry.target.id.replace('v-', '');
+                const video = videos.find(v => v.id === videoId);
+                
+                // Analytics: track how long user stays on this video
+                let startTime = Date.now();
+                
+                if (video && !entry.target.querySelector('video')) {
+                    downloadAndPlay(video.url, entry.target);
+                }
+
+                // If user scrolls away, calculate time spent
+                entry.target._timer = startTime;
+            } else {
+                if (entry.target._timer) {
+                    const timeSpent = (Date.now() - entry.target._timer) / 1000;
+                    console.log(`User spent ${timeSpent}s on ${entry.target.id}`);
+                    if (timeSpent > 30) {
+                        // "Algorithm": Fetch related content based on this video
+                        // ipcRenderer.invoke('fetch-related', videoId);
+                    }
+                }
+            }
+        });
+    }, { threshold: 0.8 });
+
+    document.querySelectorAll('.video-container').forEach(c => observer.observe(c));
 }
 
 // Cleanup on exit
