@@ -1,0 +1,23 @@
+        #feed {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            scroll-snap-type: y mandatory;
+            overflow-y: scroll;
+            scrollbar-width: none; /* Hide scrollbar Firefox */
+        }
+        #feed::-webkit-scrollbar {
+            display: none; /* Hide scrollbar Chrome/Safari */
+        }
+        .video-container {
+            width: 100%;
+            min-height: 100vh; /* Ensure full viewport height */
+            height: 100vh;
+            scroll-snap-align: start;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000;
+        }
