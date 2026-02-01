@@ -177,10 +177,12 @@ async function loadLiked() {
 }
 
 function updateNavUI(activeId) {
+    navForYou.classList.toggle('active', activeId === 'for-you');
+    navLiked.classList.toggle('active', activeId === 'liked');
+    
+    // Explicitly reset colors if needed, but the CSS class handles it now
     navForYou.style.color = activeId === 'for-you' ? '#fff' : '#666';
-    navForYou.style.background = activeId === 'for-you' ? 'rgba(255,255,255,0.1)' : 'none';
     navLiked.style.color = activeId === 'liked' ? '#fff' : '#666';
-    navLiked.style.background = activeId === 'liked' ? 'rgba(255,255,255,0.1)' : 'none';
 }
 
 navForYou.onclick = loadForYou;
@@ -204,10 +206,16 @@ function renderGrid(videos) {
     });
 }
 
-async function watchVideo(video) {
+function watchVideo(video) {
     watchOverlay.style.display = 'block';
     player.src = `http://localhost:8888/stream/${video.id}`;
     
+    // Play/Pause on click
+    player.onclick = () => {
+        if (player.paused) player.play();
+        else player.pause();
+    };
+
     // Algorithm: Fetch related content in background while user watches
     const related = await ipcRenderer.invoke('get-related-videos', video.id);
     if (related && !related.error) {
@@ -240,6 +248,21 @@ closeWatch.onclick = () => {
     player.pause();
     player.src = "";
 };
+
+// Keyboard Shortcuts
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Escape') {
+        if (watchOverlay.style.display === 'block') {
+            closeWatch.click();
+        }
+    } else if (e.code === 'Space') {
+        if (watchOverlay.style.display === 'block') {
+            e.preventDefault();
+            if (player.paused) player.play();
+            else player.pause();
+        }
+    }
+});
 
 // Start
 checkOnboarding();
