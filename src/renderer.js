@@ -104,8 +104,22 @@ function renderGrid(videos, append = false) {
 async function watchVideo(video) {
     watchOverlay.style.display = 'block';
     player.src = `http://localhost:8888/stream/${video.id}`;
+    
+    // Load persisted volume/mute settings
+    const settings = await ipcRenderer.invoke('get-settings');
+    player.volume = settings.volume;
+    player.muted = settings.muted;
+
     player.ontimeupdate = () => {
         progressBar.style.width = `${(player.currentTime / player.duration) * 100}%`;
+    };
+    
+    // Save volume/mute changes
+    player.onvolumechange = () => {
+        ipcRenderer.invoke('save-settings', { 
+            volume: player.volume, 
+            muted: player.muted 
+        });
     };
 }
 

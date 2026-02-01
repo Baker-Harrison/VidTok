@@ -40,6 +40,18 @@ class Storage {
         });
     }
 
+    async getSettings() {
+        return await this.db.findOne({ type: 'settings' }) || { volume: 1.0, muted: false };
+    }
+
+    async saveSettings(settings) {
+        await this.db.update(
+            { type: 'settings' },
+            { $set: { ...settings, type: 'settings' } },
+            { upsert: true }
+        );
+    }
+
     /**
      * Toggles a 'like' status for a video.
      * @returns {boolean} New like status

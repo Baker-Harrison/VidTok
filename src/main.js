@@ -173,6 +173,10 @@ ipcMain.handle('get-preferences', () => storage.getPreferences());
 ipcMain.handle('save-preferences', (e, c, t) => storage.savePreferences(c, t));
 ipcMain.handle('get-likes', () => storage.getLikes());
 
+ipcMain.handle('get-settings', () => storage.getSettings());
+
+ipcMain.handle('save-settings', (e, s) => storage.saveSettings(s));
+
 ipcMain.handle('search-channels', async (e, q) => {
     return safeApiCall(async () => {
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {

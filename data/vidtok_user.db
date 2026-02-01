@@ -1,6 +1,4 @@
-{"type":"like","videoId":"test_vid_123","timestamp":1769979118926,"title":"Test Video","_id":"3L6xwYuZdbZzJi3E"}
-{"$$deleted":true,"_id":"3L6xwYuZdbZzJi3E"}
-{"type":"like","videoId":"vid_A","timestamp":1769979118929,"title":"A","_id":"OT64WxHiyxHOZwyC"}
-{"type":"like","videoId":"vid_B","timestamp":1769979118929,"title":"B","_id":"IXnxN9eFFLFAeNl5"}
-{"$$deleted":true,"_id":"OT64WxHiyxHOZwyC"}
-{"$$deleted":true,"_id":"IXnxN9eFFLFAeNl5"}
+{"type":"preferences","channels":["MKBHD","Veritasium"],"topics":["Tech","Science"],"timestamp":1769982852744,"_id":"4B2jrV33tHfxtBYO"}
+{"$$deleted":true,"_id":"4B2jrV33tHfxtBYO"}
+{"type":"preferences","channels":["MKBHD","Veritasium"],"topics":["Tech","Science"],"timestamp":1769982928337,"_id":"3Sz7F02IqViGpd6K"}
+{"type":"settings","volume":0.5,"muted":true,"_id":"fBj8LEAJ31KmKyxn"}
