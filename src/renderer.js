@@ -14,56 +14,27 @@ let observer;
 
 /**
  * Triggers the download of a YouTube video and attaches it to the container.
+ * Now using the local streaming proxy for Spotify-style instant playback.
  */
 async function downloadAndPlay(video, container) {
-    const pythonScript = path.join(__dirname, '../backend/streamer.py');
-    const command = `python3 "${pythonScript}" "${video.url}"`;
+    const streamProxyUrl = `http://localhost:8888/stream/${video.id}`;
+    
+    console.log(`Attaching stream proxy for: ${video.id}`);
 
-    console.log(`Starting background download for: ${video.title}`);
-
-    exec(command, (error, stdout, stderr) => {
-        if (error) {
-            console.error(`Download error for ${video.id}: ${error.message}`);
-            container.innerHTML = `<div class="error-msg">Stream unavailable</div>`;
-            return;
-        }
-
-        try {
-            const result = JSON.parse(stdout);
-            if (result.error) {
-                container.innerHTML = `<div class="error-msg">Error: ${result.error}</div>`;
-                return;
-            }
-
-            const videoPath = result.path;
-            downloadedFiles.add(videoPath);
-
-            renderVideoElement(container, result.title, videoPath, video.id);
-        } catch (e) {
-            console.error('Failed to parse download result:', stdout);
-        }
-    });
-}
-
-/**
- * Renders the actual video element and UI overlays into the container.
- */
-function renderVideoElement(container, title, videoPath, videoId) {
     container.innerHTML = `
         <div class="ui-overlay">
-            <h3>${title}</h3>
+            <h3>${video.title}</h3>
         </div>
         <div class="side-bar">
-            <div class="action-btn like-btn" data-video-id="${videoId}">❤️</div>
+            <div class="action-btn like-btn" data-video-id="${video.id}">❤️</div>
             <div class="action-btn">💬</div>
             <div class="action-btn">🔁</div>
         </div>
-        <video src="file://${videoPath}" autoplay loop></video>
+        <video src="${streamProxyUrl}" autoplay loop></video>
     `;
 
-    // Add interaction listeners
     const likeBtn = container.querySelector('.like-btn');
-    likeBtn.onclick = () => handleInterestTrigger(videoId, 'like');
+    likeBtn.onclick = () => handleInterestTrigger(video.id, 'like');
 }
 
 /**
