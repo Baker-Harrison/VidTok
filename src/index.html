@@ -175,6 +175,20 @@
             justify-content: center;
             align-items: center;
             position: relative;
+            overflow: hidden; /* For previews */
+        }
+        .preview-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .preview-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
         }
         .duration-badge {
             position: absolute;

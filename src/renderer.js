@@ -90,13 +90,37 @@ function renderGrid(videos, append = false) {
         card.innerHTML = `
             <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover;">
                 <span class="duration-badge">${video.duration || '0:00'}</span>
+                <div class="preview-container"></div>
             </div>
             <div class="video-info">
                 <h4>${video.title}</h4>
                 <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views || ''}</p>
             </div>
         `;
+        
         card.onclick = () => watchVideo(video);
+
+        // Hover Preview Logic
+        let previewTimeout;
+        card.onmouseenter = () => {
+            previewTimeout = setTimeout(() => {
+                const container = card.querySelector('.preview-container');
+                const vid = document.createElement('video');
+                vid.src = `http://localhost:8888/stream/${video.id}`;
+                vid.muted = true;
+                vid.autoplay = true;
+                vid.loop = true;
+                vid.className = 'preview-video';
+                container.appendChild(vid);
+            }, 800); // Wait 800ms before starting preview
+        };
+
+        card.onmouseleave = () => {
+            clearTimeout(previewTimeout);
+            const container = card.querySelector('.preview-container');
+            container.innerHTML = '';
+        };
+
         videoGrid.appendChild(card);
     });
 }
