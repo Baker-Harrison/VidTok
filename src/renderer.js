@@ -10,6 +10,8 @@ const mainView = document.getElementById('main-view');
 const videoGrid = document.getElementById('video-grid');
 const watchOverlay = document.getElementById('watch-overlay');
 const player = document.getElementById('player');
+const progressBar = document.getElementById('progress-bar');
+const progressContainer = document.getElementById('progress-container');
 const closeWatch = document.getElementById('close-watch');
 const navForYou = document.getElementById('nav-for-you');
 const navLiked = document.getElementById('nav-liked');
@@ -210,6 +212,19 @@ function watchVideo(video) {
     watchOverlay.style.display = 'block';
     player.src = `http://localhost:8888/stream/${video.id}`;
     
+    // Update progress bar
+    player.ontimeupdate = () => {
+        const percent = (player.currentTime / player.duration) * 100;
+        progressBar.style.width = `${percent}%`;
+    };
+
+    // Seek on progress bar click
+    progressContainer.onclick = (e) => {
+        const rect = progressContainer.getBoundingClientRect();
+        const pos = (e.clientX - rect.left) / rect.width;
+        player.currentTime = pos * player.duration;
+    };
+
     // Play/Pause on click
     player.onclick = () => {
         if (player.paused) player.play();
@@ -260,6 +275,10 @@ window.addEventListener('keydown', (e) => {
             e.preventDefault();
             if (player.paused) player.play();
             else player.pause();
+        }
+    } else if (e.code === 'KeyM') {
+        if (watchOverlay.style.display === 'block') {
+            player.muted = !player.muted;
         }
     }
 });
