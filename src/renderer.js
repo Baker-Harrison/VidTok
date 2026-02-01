@@ -190,11 +190,26 @@ function updateNavUI(activeId) {
 navForYou.onclick = loadForYou;
 navLiked.onclick = loadLiked;
 
+function playNextInGrid(currentId) {
+    const cards = Array.from(videoGrid.querySelectorAll('.video-card'));
+    const currentIndex = cards.findIndex(c => c.id === `card-${currentId}` || c.getAttribute('data-id') === currentId);
+    
+    if (currentIndex !== -1 && currentIndex < cards.length - 1) {
+        const nextCard = cards[currentIndex + 1];
+        nextCard.click();
+    } else {
+        logStatus('Reached end of feed.');
+        closeWatch.click();
+    }
+}
+
 function renderGrid(videos) {
     videoGrid.innerHTML = '';
     videos.forEach(video => {
         const card = document.createElement('div');
         card.className = 'video-card';
+        card.id = `card-${video.id}`;
+        card.setAttribute('data-id', video.id);
         card.innerHTML = `
             <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover; background-position: center;">
                 <span class="duration-badge">${video.duration}</span>
@@ -213,6 +228,12 @@ function watchVideo(video) {
     watchOverlay.style.display = 'block';
     player.src = `http://localhost:8888/stream/${video.id}`;
     
+    // Auto-next logic
+    player.onended = () => {
+        logStatus('Video ended, playing next...');
+        playNextInGrid(video.id);
+    };
+
     // Update progress bar
     player.ontimeupdate = () => {
         const percent = (player.currentTime / player.duration) * 100;
