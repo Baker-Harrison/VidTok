@@ -113,8 +113,8 @@ server.listen(STREAM_PORT, () => {
 
 function createWindow() {
     const win = new BrowserWindow({
-        width: 450, // TikTok-like aspect ratio
-        height: 800,
+        width: 1280, // Desktop 16:9 ratio
+        height: 720,
         webPreferences: {
             nodeIntegration: true,
             contextIsolation: false,
