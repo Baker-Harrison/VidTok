@@ -11,9 +11,15 @@ function logStatus(msg) {
     console.log(`[Renderer] ${msg}`);
 }
 
+/**
+ * Main Video Loading & Proxy Interaction
+ */
 async function loadVideoIntoContainer(videoId, title, container) {
     logStatus(`Loading ${videoId}...`);
     const streamProxyUrl = `http://localhost:8888/stream/${videoId}`;
+
+    // Check if already liked
+    const isLiked = await ipcRenderer.invoke('check-like', videoId);
 
     // Pre-emptively set the UI
     container.innerHTML = `
@@ -24,7 +30,7 @@ async function loadVideoIntoContainer(videoId, title, container) {
             <h3>${title}</h3>
         </div>
         <div class="side-bar">
-            <div class="action-btn like-btn">❤️</div>
+            <div class="action-btn like-btn" style="color: ${isLiked ? '#ff4b4b' : '#fff'}">❤️</div>
             <div class="action-btn">💬</div>
             <div class="action-btn">🔁</div>
         </div>
@@ -47,6 +53,18 @@ async function loadVideoIntoContainer(videoId, title, container) {
     };
 
     container.appendChild(videoElement);
+
+    const likeBtn = container.querySelector('.like-btn');
+    likeBtn.onclick = async (e) => {
+        e.stopPropagation();
+        const newStatus = await ipcRenderer.invoke('toggle-like', videoId, { title });
+        likeBtn.style.color = newStatus ? '#ff4b4b' : '#fff';
+        
+        // If liked, trigger recommendation logic
+        if (newStatus) {
+            handleInterestTrigger(videoId, 'like');
+        }
+    };
 }
 
 function appendVideos(videos) {

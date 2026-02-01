@@ -4,6 +4,7 @@ const axios = require('axios');
 const express = require('express');
 const { exec } = require('child_process');
 const fs = require('fs');
+const storage = require('./storage');
 require('dotenv').config();
 
 const API_KEY = process.env.YOUTUBE_API_KEY;
@@ -172,6 +173,17 @@ ipcMain.handle('get-related-videos', async (event, videoId) => {
         logBackend(`YouTube Related Error: ${error.message}`);
         return { error: 'Failed to fetch related videos' };
     }
+});
+
+/**
+ * Persistence IPC Handlers
+ */
+ipcMain.handle('toggle-like', async (event, videoId, metadata) => {
+    return await storage.toggleLike(videoId, metadata);
+});
+
+ipcMain.handle('check-like', async (event, videoId) => {
+    return await storage.isLiked(videoId);
 });
 
 function filterAndMapVideos(items) {
