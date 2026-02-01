@@ -67,6 +67,14 @@ async function loadVideoIntoContainer(videoId, title, container) {
     };
 }
 
+async function handleInterestTrigger(videoId, type) {
+    console.log(`[Signal] ${type} for ${videoId}`);
+    const relatedVideos = await ipcRenderer.invoke('get-related-videos', videoId);
+    if (relatedVideos && !relatedVideos.error) {
+        appendVideos(relatedVideos);
+    }
+}
+
 function appendVideos(videos) {
     videos.forEach(video => {
         if (document.getElementById(`v-${video.id}`)) return;
@@ -84,6 +92,32 @@ function appendVideos(videos) {
 
 async function init() {
     logStatus('Starting Feed...');
+
+    // Keyboard Navigation
+    window.addEventListener('keydown', (e) => {
+        const activeContainer = Array.from(document.querySelectorAll('.video-container'))
+            .find(c => {
+                const rect = c.getBoundingClientRect();
+                return rect.top >= -50 && rect.top <= 50;
+            });
+
+        if (e.code === 'Space') {
+            e.preventDefault();
+            if (activeContainer) {
+                const video = activeContainer.querySelector('video');
+                if (video) {
+                    if (video.paused) video.play();
+                    else video.pause();
+                }
+            }
+        } else if (e.code === 'ArrowDown') {
+            e.preventDefault();
+            feed.scrollBy({ top: window.innerHeight, behavior: 'smooth' });
+        } else if (e.code === 'ArrowUp') {
+            e.preventDefault();
+            feed.scrollBy({ top: -window.innerHeight, behavior: 'smooth' });
+        }
+    });
 
     observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
