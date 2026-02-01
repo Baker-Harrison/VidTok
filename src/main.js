@@ -133,7 +133,7 @@ function handleApiError(error) {
 }
 
 /**
- * IPC Handlers with Pagination Support
+ * IPC Handlers with Pagination and Recursive Discovery
  */
 ipcMain.handle('get-trending-videos', async (event, pageToken = null) => {
     return safeApiCall(async () => {
@@ -172,13 +172,9 @@ ipcMain.handle('check-like', (e, id) => storage.isLiked(id));
 ipcMain.handle('get-preferences', () => storage.getPreferences());
 ipcMain.handle('save-preferences', (e, c, t) => storage.savePreferences(c, t));
 ipcMain.handle('get-likes', () => storage.getLikes());
-
 ipcMain.handle('get-settings', () => storage.getSettings());
-
 ipcMain.handle('save-settings', (e, s) => storage.saveSettings(s));
-
 ipcMain.handle('save-position', (e, id, pos) => storage.savePlaybackPosition(id, pos));
-
 ipcMain.handle('get-position', (e, id) => storage.getPlaybackPosition(id));
 
 ipcMain.handle('search-channels', async (e, q) => {
@@ -196,14 +192,26 @@ ipcMain.handle('search-channels', async (e, q) => {
 
 ipcMain.handle('get-personalized-feed', async (event, prefs, pageToken = null) => {
     return safeApiCall(async () => {
-        const query = [...prefs.channels, ...prefs.topics].join(' ') || 'trending';
+        const likes = await storage.getLikes();
+        let query = [...prefs.channels, ...prefs.topics];
+        
+        // Recursive Algorithm 2.0: Interest Blending
+        if (likes && likes.length > 0) {
+            const recentLikes = likes.slice(0, 3).map(l => l.title);
+            logBackend(`Blending interests with recent likes: ${recentLikes.join(', ')}`);
+            query = [...recentLikes, ...query];
+        }
+
+        const queryString = query.join(' ') || 'trending';
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-            params: { part: 'snippet', q: query, type: 'video', maxResults: 20, pageToken, key: API_KEY }
+            params: { part: 'snippet', q: queryString, type: 'video', maxResults: 20, pageToken, key: API_KEY }
         });
+
         const videoIds = response.data.items.map(i => i.id.videoId).join(',');
         const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
             params: { part: 'snippet,contentDetails,statistics', id: videoIds, key: API_KEY }
         });
+
         return {
             videos: filterAndMapVideos(detailsResponse.data.items),
             nextPageToken: response.data.nextPageToken
