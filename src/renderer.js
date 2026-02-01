@@ -27,6 +27,24 @@ let debounceTimer;
 let nextPageToken = null;
 let isLoadingMore = false;
 let currentViewMode = 'for-you';
+let allVideos = [];
+
+const VIRTUAL_WINDOW_TARGET = 15;
+const MAX_DOM_CARDS = 30;
+const DEFAULT_CARD_HEIGHT = 240;
+const DEFAULT_ROW_GAP = 20;
+
+const virtualState = {
+    cardPool: [],
+    topSpacer: null,
+    bottomSpacer: null,
+    itemHeight: null,
+    rowGap: DEFAULT_ROW_GAP,
+    columns: 1,
+    lastRange: { start: 0, end: -1 },
+    rafHandle: null,
+    forceNextRender: false,
+};
 
 async function checkOnboarding() {
     const prefs = await ipcRenderer.invoke('get-preferences');
@@ -82,47 +100,180 @@ async function loadLiked() {
 }
 
 function renderGrid(videos, append = false) {
-    if (!append) videoGrid.innerHTML = '';
-    videos.forEach(video => {
-        const card = document.createElement('div');
-        card.className = 'video-card';
-        card.id = `card-${video.id}`;
-        card.innerHTML = `
-            <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover;">
-                <span class="duration-badge">${video.duration || '0:00'}</span>
-                <div class="preview-container"></div>
-            </div>
-            <div class="video-info">
-                <h4>${video.title}</h4>
-                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views || ''}</p>
-            </div>
-        `;
-        
-        card.onclick = () => watchVideo(video);
+    if (!append) {
+        allVideos = [];
+        contentContainer.scrollTop = 0;
+    }
+    if (Array.isArray(videos) && videos.length > 0) {
+        allVideos = append ? allVideos.concat(videos) : videos.slice();
+    }
+    scheduleVirtualRender(true);
+}
 
-        // Hover Preview Logic
-        let previewTimeout;
-        card.onmouseenter = () => {
-            previewTimeout = setTimeout(() => {
-                const container = card.querySelector('.preview-container');
-                const vid = document.createElement('video');
-                vid.src = `http://localhost:8888/stream/${video.id}`;
-                vid.muted = true;
-                vid.autoplay = true;
-                vid.loop = true;
-                vid.className = 'preview-video';
-                container.appendChild(vid);
-            }, 800); // Wait 800ms before starting preview
-        };
+function ensureSpacers() {
+    if (!virtualState.topSpacer) {
+        virtualState.topSpacer = document.createElement('div');
+        virtualState.topSpacer.className = 'grid-spacer';
+        virtualState.topSpacer.style.gridColumn = '1 / -1';
+        virtualState.topSpacer.style.height = '0px';
+    }
+    if (!virtualState.bottomSpacer) {
+        virtualState.bottomSpacer = document.createElement('div');
+        virtualState.bottomSpacer.className = 'grid-spacer';
+        virtualState.bottomSpacer.style.gridColumn = '1 / -1';
+        virtualState.bottomSpacer.style.height = '0px';
+    }
+}
 
-        card.onmouseleave = () => {
-            clearTimeout(previewTimeout);
-            const container = card.querySelector('.preview-container');
-            container.innerHTML = '';
-        };
+function buildCardElement() {
+    const card = document.createElement('div');
+    card.className = 'video-card';
+    card.innerHTML = `
+        <div class="thumb" style="background-size: cover;">
+            <span class="duration-badge">0:00</span>
+            <div class="preview-container"></div>
+        </div>
+        <div class="video-info">
+            <h4></h4>
+            <p style="color: #666; font-size: 0.8rem; margin-top: 5px;"></p>
+        </div>
+    `;
+    return card;
+}
 
-        videoGrid.appendChild(card);
+function updateCard(card, video) {
+    card.id = `card-${video.id}`;
+    card.dataset.videoId = video.id;
+
+    const thumb = card.querySelector('.thumb');
+    thumb.style.backgroundImage = `url('${video.thumbnail}')`;
+
+    const duration = card.querySelector('.duration-badge');
+    duration.textContent = video.duration || '0:00';
+
+    const title = card.querySelector('.video-info h4');
+    title.textContent = video.title || '';
+
+    const views = card.querySelector('.video-info p');
+    views.textContent = video.views || '';
+
+    const container = card.querySelector('.preview-container');
+    container.innerHTML = '';
+    if (card.__previewTimeout) {
+        clearTimeout(card.__previewTimeout);
+        card.__previewTimeout = null;
+    }
+
+    card.onclick = () => watchVideo(video);
+
+    card.onmouseenter = () => {
+        card.__previewTimeout = setTimeout(() => {
+            const vid = document.createElement('video');
+            vid.src = `http://localhost:8888/stream/${video.id}`;
+            vid.muted = true;
+            vid.autoplay = true;
+            vid.loop = true;
+            vid.className = 'preview-video';
+            container.appendChild(vid);
+        }, 800);
+    };
+
+    card.onmouseleave = () => {
+        if (card.__previewTimeout) {
+            clearTimeout(card.__previewTimeout);
+            card.__previewTimeout = null;
+        }
+        container.innerHTML = '';
+    };
+}
+
+function computeGridMetrics() {
+    const styles = getComputedStyle(videoGrid);
+    if (styles.gridTemplateColumns && styles.gridTemplateColumns !== 'none') {
+        const columns = styles.gridTemplateColumns.split(' ').length;
+        virtualState.columns = Math.max(1, columns);
+    }
+    const rowGapValue = parseFloat(styles.rowGap || styles.gridRowGap || styles.gap || DEFAULT_ROW_GAP);
+    if (!Number.isNaN(rowGapValue)) {
+        virtualState.rowGap = rowGapValue;
+    }
+}
+
+function scheduleVirtualRender(force = false) {
+    if (force) virtualState.forceNextRender = true;
+    if (virtualState.rafHandle) return;
+    const raf = window.requestAnimationFrame || ((cb) => setTimeout(cb, 16));
+    virtualState.rafHandle = raf(() => {
+        virtualState.rafHandle = null;
+        renderVirtualWindow(virtualState.forceNextRender);
+        virtualState.forceNextRender = false;
     });
+}
+
+function renderVirtualWindow(force = false) {
+    if (!videoGrid) return;
+    if (!allVideos || allVideos.length === 0) {
+        videoGrid.innerHTML = '';
+        virtualState.cardPool = [];
+        virtualState.lastRange = { start: 0, end: -1 };
+        return;
+    }
+
+    ensureSpacers();
+    computeGridMetrics();
+
+    const columns = virtualState.columns || 1;
+    const rowHeight = (virtualState.itemHeight || DEFAULT_CARD_HEIGHT) + virtualState.rowGap;
+    const desiredCount = Math.min(allVideos.length, Math.max(VIRTUAL_WINDOW_TARGET, Math.min(MAX_DOM_CARDS, allVideos.length)));
+
+    const scrollTop = contentContainer.scrollTop || 0;
+    const approxRow = Math.floor(scrollTop / rowHeight);
+    const approxIndex = approxRow * columns;
+    const halfWindow = Math.floor(desiredCount / 2);
+
+    let startIndex = Math.max(0, approxIndex - halfWindow);
+    const maxStart = Math.max(0, allVideos.length - desiredCount);
+    if (startIndex > maxStart) startIndex = maxStart;
+
+    const endIndex = Math.min(allVideos.length - 1, startIndex + desiredCount - 1);
+
+    if (!force && startIndex === virtualState.lastRange.start && endIndex === virtualState.lastRange.end) {
+        return;
+    }
+    virtualState.lastRange = { start: startIndex, end: endIndex };
+
+    const neededCount = endIndex - startIndex + 1;
+    if (virtualState.cardPool.length > neededCount) {
+        virtualState.cardPool.length = neededCount;
+    } else {
+        while (virtualState.cardPool.length < neededCount) {
+            virtualState.cardPool.push(buildCardElement());
+        }
+    }
+
+    for (let i = 0; i < neededCount; i += 1) {
+        updateCard(virtualState.cardPool[i], allVideos[startIndex + i]);
+    }
+
+    const totalRows = Math.ceil(allVideos.length / columns);
+    const startRow = Math.floor(startIndex / columns);
+    const endRow = Math.floor(endIndex / columns);
+    virtualState.topSpacer.style.height = `${startRow * rowHeight}px`;
+    virtualState.bottomSpacer.style.height = `${Math.max(0, (totalRows - endRow - 1) * rowHeight)}px`;
+
+    videoGrid.replaceChildren(
+        virtualState.topSpacer,
+        ...virtualState.cardPool,
+        virtualState.bottomSpacer
+    );
+
+    if (!virtualState.itemHeight && virtualState.cardPool[0]) {
+        const rect = virtualState.cardPool[0].getBoundingClientRect();
+        if (rect.height) {
+            virtualState.itemHeight = rect.height;
+            renderVirtualWindow(true);
+        }
+    }
 }
 
 async function watchVideo(video) {
@@ -164,6 +315,7 @@ async function watchVideo(video) {
 
 // Infinite Scroll Detection
 contentContainer.onscroll = () => {
+    scheduleVirtualRender();
     if (currentViewMode !== 'for-you') return;
     const { scrollTop, scrollHeight, clientHeight } = contentContainer;
     if (scrollTop + clientHeight >= scrollHeight - 100) {
@@ -275,5 +427,21 @@ window.addEventListener('keydown', (e) => {
         player.paused ? player.play() : player.pause();
     }
 });
+
+window.addEventListener('resize', () => scheduleVirtualRender(true));
+
+window.__vidtok = {
+    setVirtualVideos: (videos) => {
+        allVideos = Array.isArray(videos) ? videos.slice() : [];
+        scheduleVirtualRender(true);
+    },
+    setVirtualDimensions: (dims = {}) => {
+        if (typeof dims.itemHeight === 'number') virtualState.itemHeight = dims.itemHeight;
+        if (typeof dims.rowGap === 'number') virtualState.rowGap = dims.rowGap;
+        if (typeof dims.columns === 'number') virtualState.columns = Math.max(1, dims.columns);
+    },
+    renderVirtualWindow: (force = true) => renderVirtualWindow(force),
+    getDomCardCount: () => videoGrid.querySelectorAll('.video-card').length,
+};
 
 checkOnboarding();
