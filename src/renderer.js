@@ -19,6 +19,11 @@ const channelPillsContainer = document.getElementById('channel-pills');
 const topicInput = document.getElementById('topic-input');
 const topicPillsContainer = document.getElementById('topic-pills');
 
+const statusApiDot = document.getElementById('status-api-dot');
+const statusApiText = document.getElementById('status-api-text');
+const statusInternetText = document.getElementById('status-internet-text');
+const statusQuotaText = document.getElementById('status-quota-text');
+
 let currentPrefs = null;
 let selectedChannels = [];
 let selectedTopics = [];
@@ -33,6 +38,7 @@ const VIRTUAL_WINDOW_TARGET = 15;
 const MAX_DOM_CARDS = 30;
 const DEFAULT_CARD_HEIGHT = 240;
 const DEFAULT_ROW_GAP = 20;
+const HEALTH_POLL_INTERVAL = 30000;
 
 const virtualState = {
     cardPool: [],
@@ -45,6 +51,66 @@ const virtualState = {
     rafHandle: null,
     forceNextRender: false,
 };
+
+const healthState = {
+    errorCount: 0,
+    lastApiOk: false,
+    lastOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    pollHandle: null,
+};
+
+function getQuotaUsageLabel(errorCount) {
+    if (errorCount >= 5) return 'Usage: High';
+    if (errorCount >= 2) return 'Usage: Med';
+    return 'Usage: Low';
+}
+
+function updateHealthUI() {
+    if (!statusApiDot && !statusApiText && !statusInternetText && !statusQuotaText) return;
+
+    if (statusApiDot) {
+        statusApiDot.classList.toggle('status-ok', Boolean(healthState.lastApiOk));
+        statusApiDot.classList.toggle('status-bad', !healthState.lastApiOk);
+    }
+    if (statusApiText) {
+        statusApiText.textContent = healthState.lastApiOk ? 'Reachable' : 'Unreachable';
+    }
+    if (statusInternetText) {
+        statusInternetText.textContent = healthState.lastOnline ? 'Online' : 'Offline';
+    }
+    if (statusQuotaText) {
+        statusQuotaText.textContent = getQuotaUsageLabel(healthState.errorCount);
+    }
+}
+
+function recordApiError() {
+    healthState.errorCount = Math.min(healthState.errorCount + 1, 99);
+    updateHealthUI();
+}
+
+async function pollHealthStatus() {
+    healthState.lastOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+    if (!healthState.lastOnline) {
+        healthState.lastApiOk = false;
+        updateHealthUI();
+        return;
+    }
+    try {
+        const res = await ipcRenderer.invoke('ping-api');
+        healthState.lastApiOk = Boolean(res && res.ok);
+    } catch (e) {
+        healthState.lastApiOk = false;
+    }
+    updateHealthUI();
+}
+
+function startHealthPolling() {
+    if (!statusApiDot && !statusInternetText && !statusQuotaText && !statusApiText) return;
+    updateHealthUI();
+    pollHealthStatus();
+    if (healthState.pollHandle) clearInterval(healthState.pollHandle);
+    healthState.pollHandle = setInterval(pollHealthStatus, HEALTH_POLL_INTERVAL);
+}
 
 async function checkOnboarding() {
     const prefs = await ipcRenderer.invoke('get-preferences');
@@ -77,6 +143,7 @@ async function loadForYou(append = false) {
     const result = await ipcRenderer.invoke('get-personalized-feed', currentPrefs, append ? nextPageToken : null);
     
     if (result.error) {
+        recordApiError();
         if (!append) videoGrid.innerHTML = `<div class="error-msg">${result.error}</div>`;
     } else {
         nextPageToken = result.nextPageToken;
@@ -342,7 +409,8 @@ channelInput.oninput = () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
         const res = await ipcRenderer.invoke('search-channels', q);
-        if (res && !res.error) renderSuggestions(res);
+        if (res && res.error) recordApiError();
+        if (res) renderSuggestions(res);
     }, 400);
 };
 
@@ -442,6 +510,20 @@ window.__vidtok = {
     },
     renderVirtualWindow: (force = true) => renderVirtualWindow(force),
     getDomCardCount: () => videoGrid.querySelectorAll('.video-card').length,
+    updateHealthStatus: () => pollHealthStatus(),
+    setHealthErrorCount: (count) => {
+        healthState.errorCount = Math.max(0, Number.isFinite(count) ? count : 0);
+        updateHealthUI();
+    },
+    getHealthState: () => ({ ...healthState }),
 };
+
+if (typeof window !== 'undefined') {
+    if (!window.__DISABLE_HEALTH_POLLING__) {
+        startHealthPolling();
+        window.addEventListener('online', pollHealthStatus);
+        window.addEventListener('offline', pollHealthStatus);
+    }
+}
 
 checkOnboarding();

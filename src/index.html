@@ -268,6 +268,53 @@
             color: #fff !important;
             font-weight: 600;
         }
+        .system-status {
+            margin-top: 24px;
+            padding: 12px;
+            border: 1px solid #111;
+            border-radius: 12px;
+            background: #0b0b0b;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .system-status-title {
+            color: #777;
+            font-size: 0.65rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+        .system-status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .status-label {
+            color: #888;
+            font-size: 0.75rem;
+        }
+        .status-value {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: #fff;
+            font-size: 0.75rem;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #444;
+        }
+        .status-dot.status-ok {
+            background: #29c46a;
+            box-shadow: 0 0 6px rgba(41,196,106,0.6);
+        }
+        .status-dot.status-bad {
+            background: #ff4b4b;
+            box-shadow: 0 0 6px rgba(255,75,75,0.6);
+        }
     </style>
 </head>
 <body>
@@ -300,6 +347,24 @@
                 <button class="nav-item active" id="nav-for-you" style="background: none; border: none; color: #fff; text-align: left; font-size: 1rem; cursor: pointer; padding: 10px; border-radius: 8px;">🏠 For You</button>
                 <button class="nav-item" id="nav-liked" style="background: none; border: none; color: #666; text-align: left; font-size: 1rem; cursor: pointer; padding: 10px; border-radius: 8px;">❤️ Liked</button>
             </nav>
+            <section class="system-status" aria-label="System Status">
+                <div class="system-status-title">System Status</div>
+                <div class="system-status-row">
+                    <span class="status-label">API Status</span>
+                    <span class="status-value">
+                        <span class="status-dot" id="status-api-dot"></span>
+                        <span id="status-api-text">Checking...</span>
+                    </span>
+                </div>
+                <div class="system-status-row">
+                    <span class="status-label">Internet</span>
+                    <span class="status-value" id="status-internet-text">Checking...</span>
+                </div>
+                <div class="system-status-row">
+                    <span class="status-label">Quota</span>
+                    <span class="status-value" id="status-quota-text">Usage: Low</span>
+                </div>
+            </section>
             <div style="position: absolute; bottom: 20px; left: 20px; color: #444; font-size: 0.7rem;">
                 Algorithm active
             </div>

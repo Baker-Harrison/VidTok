@@ -194,6 +194,18 @@ ipcMain.handle('search-channels', async (e, q) => {
     }, 'channel search');
 });
 
+ipcMain.handle('ping-api', async () => {
+    try {
+        const response = await axios.head('https://www.googleapis.com/generate_204', {
+            timeout: 4000,
+            validateStatus: (status) => status >= 200 && status < 400,
+        });
+        return { ok: response.status >= 200 && response.status < 400 };
+    } catch (error) {
+        return { ok: false, error: error.message };
+    }
+});
+
 ipcMain.handle('get-personalized-feed', async (event, prefs, pageToken = null) => {
     return safeApiCall(async () => {
         const sinceTimestamp = Date.now() - (48 * 60 * 60 * 1000);
