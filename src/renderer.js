@@ -204,19 +204,27 @@ function playNextInGrid(currentId) {
 }
 
 function renderGrid(videos) {
+    if (!videos || videos.length === 0) {
+        videoGrid.innerHTML = '<div class="error-msg">No videos found. Try adding more topics in Onboarding.</div>';
+        return;
+    }
     videoGrid.innerHTML = '';
     videos.forEach(video => {
         const card = document.createElement('div');
         card.className = 'video-card';
         card.id = `card-${video.id}`;
         card.setAttribute('data-id', video.id);
+        
+        // Redundancy: Thumbnail fallback
+        const thumbUrl = video.thumbnail || 'https://via.placeholder.com/1280x720/111/fff?text=No+Thumbnail';
+        
         card.innerHTML = `
-            <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover; background-position: center;">
-                <span class="duration-badge">${video.duration}</span>
+            <div class="thumb" style="background-image: url('${thumbUrl}'); background-size: cover; background-position: center;">
+                <span class="duration-badge">${video.duration || '0:00'}</span>
             </div>
             <div class="video-info">
-                <h4>${video.title}</h4>
-                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views}</p>
+                <h4>${video.title || 'Untitled Video'}</h4>
+                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views || 'Unknown'} views</p>
             </div>
         `;
         card.onclick = () => watchVideo(video);

@@ -1,10 +1,12 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const axios = require('axios');
+const axiosRetry = require('axios-retry').default;
 const express = require('express');
 const { exec } = require('child_process');
 const fs = require('fs');
 const storage = require('./storage');
+const { filterAndMapVideos } = require('./utils');
 require('dotenv').config();
 
 const API_KEY = process.env.YOUTUBE_API_KEY;
@@ -12,48 +14,39 @@ const STREAM_PORT = 8888;
 const TEMP_DIR = path.join(app.getPath('temp'), 'vidtok_cache');
 const LOG_FILE = path.join(TEMP_DIR, 'backend.log');
 
+// Redundancy Layer 1: API Retry Logic
+axiosRetry(axios, { 
+    retries: 3, 
+    retryDelay: axiosRetry.exponentialDelay,
+    retryCondition: (error) => {
+        // Retry on network errors or 429 (rate limit)
+        return axiosRetry.isNetworkOrIdempotentRequestError(error) || error.response?.status === 429;
+    }
+});
+
 if (!fs.existsSync(TEMP_DIR)) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
 
+/**
+ * Robust Logging System
+ */
 function logBackend(msg) {
     const entry = `[${new Date().toISOString()}] ${msg}\n`;
-    fs.appendFileSync(LOG_FILE, entry);
+    try {
+        fs.appendFileSync(LOG_FILE, entry);
+    } catch (e) {
+        console.error('Logging failed:', e);
+    }
     console.log(msg);
 }
 
-logBackend('Starting VidTok Backend...');
+logBackend('Starting VidTok Backend with Redundancy Layer...');
 
 /**
- * Local Streaming Server
+ * Local Streaming Server (Redundancy Layer 2: Resilient Proxy)
  */
 const server = express();
-
-/**
- * Resolves the correct Python executable path.
- * Favors virtual environments (venv/.venv) in the project root.
- */
-function getPythonPath() {
-    const rootDir = path.join(__dirname, '..');
-    const venvPaths = [
-        path.join(rootDir, 'venv', 'bin', 'python3'),
-        path.join(rootDir, '.venv', 'bin', 'python3'),
-        path.join(rootDir, 'venv', 'Scripts', 'python.exe'), // Windows
-        path.join(rootDir, '.venv', 'Scripts', 'python.exe'), // Windows
-    ];
-
-    for (const venvPath of venvPaths) {
-        if (fs.existsSync(venvPath)) {
-            logBackend(`Using Virtualenv Python: ${venvPath}`);
-            return `"${venvPath}"`;
-        }
-    }
-
-    logBackend('Virtualenv not found. Falling back to system python3.');
-    return 'python3';
-}
-
-const PYTHON_EXE = getPythonPath();
 
 server.get('/stream/:videoId', async (req, res) => {
     const videoId = req.params.videoId;
@@ -61,26 +54,40 @@ server.get('/stream/:videoId', async (req, res) => {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const pythonScript = path.join(__dirname, '../backend/streamer.py');
 
+    // Redundancy: Timeout protection for Python script
+    const pythonTimeout = setTimeout(() => {
+        logBackend(`Python script timed out for: ${videoId}`);
+        if (!res.headersSent) res.status(504).send('Metadata timeout');
+    }, 10000);
+
     exec(`${PYTHON_EXE} "${pythonScript}" "${url}"`, async (error, stdout) => {
+        clearTimeout(pythonTimeout);
         if (error) {
             logBackend(`Python Error: ${error.message}`);
             return res.status(500).send('Error fetching stream metadata');
         }
 
+        let metadata;
         try {
-            const metadata = JSON.parse(stdout);
+            metadata = JSON.parse(stdout);
             if (metadata.error) {
                 logBackend(`Metadata Error: ${metadata.error}`);
                 return res.status(404).send(metadata.error);
             }
+        } catch (e) {
+            logBackend(`JSON Parse Error: ${stdout}`);
+            return res.status(500).send('Invalid metadata response');
+        }
 
-            const streamUrl = metadata.stream_url;
-            logBackend(`Proxied Stream URL obtained for ${videoId}`);
+        const streamUrl = metadata.stream_url;
+        const filePath = path.join(TEMP_DIR, `${videoId}.mp4`);
 
+        try {
             const response = await axios({
                 method: 'get',
                 url: streamUrl,
                 responseType: 'stream',
+                timeout: 30000, // 30s timeout for stream start
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
                 }
@@ -89,23 +96,49 @@ server.get('/stream/:videoId', async (req, res) => {
             res.setHeader('Content-Type', 'video/mp4');
             if (metadata.filesize) res.setHeader('Content-Length', metadata.filesize);
 
+            const fileStream = fs.createWriteStream(filePath);
+            
+            // Double-pipe with error handling
             response.data.pipe(res);
-            logBackend(`Streaming started for ${videoId}`);
+            response.data.pipe(fileStream);
 
-            // Background download
-            const filePath = path.join(TEMP_DIR, `${videoId}.mp4`);
-            if (!fs.existsSync(filePath)) {
-                const fileStream = fs.createWriteStream(filePath);
-                response.data.pipe(fileStream);
-                fileStream.on('finish', () => logBackend(`Download complete for ${videoId}`));
-            }
+            req.on('close', () => {
+                logBackend(`Client disconnected: ${videoId}`);
+                if (!fileStream.writableEnded) fileStream.end();
+            });
+
+            response.data.on('error', (err) => {
+                logBackend(`Upstream stream error for ${videoId}: ${err.message}`);
+                if (!res.headersSent) res.status(502).send('Upstream failure');
+                fileStream.destroy();
+            });
 
         } catch (e) {
-            logBackend(`Proxy Error: ${e.message}`);
-            res.status(500).send('Streaming logic failed');
+            logBackend(`Proxy Pipeline Error for ${videoId}: ${e.message}`);
+            if (!res.headersSent) res.status(500).send('Streaming logic failed');
         }
     });
 });
+
+/**
+ * Resolves the correct Python executable path.
+ */
+function getPythonPath() {
+    const rootDir = path.join(__dirname, '..');
+    const venvPaths = [
+        path.join(rootDir, 'venv', 'bin', 'python3'),
+        path.join(rootDir, '.venv', 'bin', 'python3'),
+        path.join(rootDir, 'venv', 'Scripts', 'python.exe'),
+        path.join(rootDir, '.venv', 'Scripts', 'python.exe'),
+    ];
+
+    for (const venvPath of venvPaths) {
+        if (fs.existsSync(venvPath)) return `"${venvPath}"`;
+    }
+    return 'python3';
+}
+
+const PYTHON_EXE = getPythonPath();
 
 server.listen(STREAM_PORT, () => {
     logBackend(`Streaming proxy active on port ${STREAM_PORT}`);
@@ -113,7 +146,7 @@ server.listen(STREAM_PORT, () => {
 
 function createWindow() {
     const win = new BrowserWindow({
-        width: 1280, // Desktop 16:9 ratio
+        width: 1280,
         height: 720,
         webPreferences: {
             nodeIntegration: true,
@@ -127,18 +160,30 @@ function createWindow() {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
+    // Redundancy Layer 3: Safe Cleanup
+    try {
+        if (fs.existsSync(TEMP_DIR)) {
+            const files = fs.readdirSync(TEMP_DIR);
+            for (const file of files) {
+                if (file.endsWith('.mp4')) {
+                    fs.unlinkSync(path.join(TEMP_DIR, file));
+                }
+            }
+        }
+    } catch (e) {
+        logBackend(`Cleanup Error: ${e.message}`);
+    }
     if (process.platform !== 'darwin') app.quit();
 });
 
 /**
- * IPC Handlers
+ * IPC Handlers with Centralized Redundancy
  */
 ipcMain.handle('get-trending-videos', async () => {
-    logBackend('Fetching trending videos...');
-    try {
+    return safeApiCall(async () => {
         const response = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
             params: {
-                part: 'snippet,contentDetails',
+                part: 'snippet,contentDetails,statistics',
                 chart: 'mostPopular',
                 regionCode: 'US',
                 maxResults: 20,
@@ -146,15 +191,11 @@ ipcMain.handle('get-trending-videos', async () => {
             }
         });
         return filterAndMapVideos(response.data.items);
-    } catch (error) {
-        logBackend(`YouTube List Error: ${error.message}`);
-        return { error: 'Failed to fetch trending videos' };
-    }
+    }, 'trending feed');
 });
 
 ipcMain.handle('get-related-videos', async (event, videoId) => {
-    logBackend(`Fetching related for ${videoId}...`);
-    try {
+    return safeApiCall(async () => {
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
             params: {
                 part: 'snippet',
@@ -165,7 +206,6 @@ ipcMain.handle('get-related-videos', async (event, videoId) => {
             }
         });
 
-        // Search API doesn't return contentDetails (duration), so we need a secondary call to filter Shorts
         const videoIds = response.data.items.map(i => i.id.videoId).join(',');
         const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
             params: {
@@ -176,129 +216,53 @@ ipcMain.handle('get-related-videos', async (event, videoId) => {
         });
 
         return filterAndMapVideos(detailsResponse.data.items);
+    }, 'related videos');
+});
+
+async function safeApiCall(fn, context) {
+    try {
+        return await fn();
     } catch (error) {
         handleApiError(error);
-        return { error: 'Failed to fetch related videos' };
+        return { error: `Failed to fetch ${context}` };
     }
-});
+}
 
-/**
- * Persistence IPC Handlers
- */
-ipcMain.handle('toggle-like', async (event, videoId, metadata) => {
-    return await storage.toggleLike(videoId, metadata);
-});
-
-ipcMain.handle('check-like', async (event, videoId) => {
-    return await storage.isLiked(videoId);
-});
-
-ipcMain.handle('get-preferences', async () => {
-    return await storage.getPreferences();
-});
-
-ipcMain.handle('save-preferences', async (event, channels, topics) => {
-    return await storage.savePreferences(channels, topics);
-});
-
-ipcMain.handle('get-likes', async () => {
-    return await storage.getLikes();
-});
-
-ipcMain.handle('search-channels', async (event, query) => {
-    try {
+ipcMain.handle('toggle-like', (e, id, meta) => storage.toggleLike(id, meta));
+ipcMain.handle('check-like', (e, id) => storage.isLiked(id));
+ipcMain.handle('get-preferences', () => storage.getPreferences());
+ipcMain.handle('save-preferences', (e, c, t) => storage.savePreferences(c, t));
+ipcMain.handle('get-likes', () => storage.getLikes());
+ipcMain.handle('search-channels', async (e, q) => {
+    return safeApiCall(async () => {
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-            params: {
-                part: 'snippet',
-                q: query,
-                type: 'channel',
-                maxResults: 5,
-                key: API_KEY
-            }
+            params: { part: 'snippet', q, type: 'channel', maxResults: 5, key: API_KEY }
         });
-
         return response.data.items.map(item => ({
             id: item.snippet.channelId,
             title: item.snippet.title,
             thumbnail: item.snippet.thumbnails.default.url
         }));
-    } catch (error) {
-        handleApiError(error);
-        return { error: 'Failed to search channels' };
-    }
+    }, 'channel search');
 });
 
 ipcMain.handle('get-personalized-feed', async (event, prefs) => {
-    logBackend(`Fetching personalized feed for channels: ${prefs.channels.join(', ')} and topics: ${prefs.topics.join(', ')}`);
-    try {
+    return safeApiCall(async () => {
         const query = [...prefs.channels, ...prefs.topics].join(' ') || 'trending';
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-            params: {
-                part: 'snippet',
-                q: query,
-                type: 'video',
-                maxResults: 25,
-                key: API_KEY
-            }
+            params: { part: 'snippet', q: query, type: 'video', maxResults: 25, key: API_KEY }
         });
 
-        // Search API doesn't return contentDetails (duration), so we need a secondary call
         const videoIds = response.data.items.map(i => i.id.videoId).join(',');
         const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
-            params: {
-                part: 'snippet,contentDetails,statistics',
-                id: videoIds,
-                key: API_KEY
-            }
+            params: { part: 'snippet,contentDetails,statistics', id: videoIds, key: API_KEY }
         });
 
         return filterAndMapVideos(detailsResponse.data.items);
-    } catch (error) {
-        handleApiError(error);
-        return { error: 'Failed to fetch personalized feed' };
-    }
+    }, 'personalized feed');
 });
 
-function filterAndMapVideos(items) {
-    return items.filter(item => {
-        const duration = item.contentDetails.duration;
-        // Strict Shorts Filter: Duration must include 'M' or 'H' (Minutes or Hours)
-        // Shorts are strictly under 60s (PT59S)
-        const isShort = duration.startsWith('PT') && !duration.includes('M') && !duration.includes('H');
-        return !isShort;
-    }).map(item => ({
-        id: item.id,
-        title: item.snippet.title,
-        url: `https://www.youtube.com/watch?v=${item.id}`,
-        thumbnail: item.snippet.thumbnails.high.url,
-        duration: formatDuration(item.contentDetails.duration),
-        views: formatViews(item.statistics.viewCount)
-    })).slice(0, 15);
-}
-
-/**
- * Converts ISO 8601 duration (PT1M20S) to readable (1:20)
- */
-function formatDuration(iso) {
-    const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-    const hours = parseInt(match[1]) || 0;
-    const minutes = parseInt(match[2]) || 0;
-    const seconds = parseInt(match[3]) || 0;
-    
-    const parts = [];
-    if (hours > 0) parts.push(hours);
-    parts.push(hours > 0 ? minutes.toString().padStart(2, '0') : minutes);
-    parts.push(seconds.toString().padStart(2, '0'));
-    
-    return parts.join(':');
-}
-
-/**
- * Formats view counts (e.g. 1.2M)
- */
-function formatViews(count) {
-    const num = parseInt(count);
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M views';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K views';
-    return num + ' views';
+function handleApiError(error) {
+    const details = error.response ? error.response.data : error.message;
+    logBackend(`YouTube API Error: ${JSON.stringify(details)}`);
 }
