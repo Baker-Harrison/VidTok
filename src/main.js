@@ -160,15 +160,22 @@ ipcMain.handle('get-related-videos', async (event, videoId) => {
                 part: 'snippet',
                 relatedToVideoId: videoId,
                 type: 'video',
-                maxResults: 5,
+                maxResults: 10,
                 key: API_KEY
             }
         });
-        return response.data.items.map(item => ({
-            id: item.id.videoId,
-            title: item.snippet.title,
-            url: `https://www.youtube.com/watch?v=${item.id.videoId}`
-        }));
+
+        // Search API doesn't return contentDetails (duration), so we need a secondary call to filter Shorts
+        const videoIds = response.data.items.map(i => i.id.videoId).join(',');
+        const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
+            params: {
+                part: 'snippet,contentDetails',
+                id: videoIds,
+                key: API_KEY
+            }
+        });
+
+        return filterAndMapVideos(detailsResponse.data.items);
     } catch (error) {
         logBackend(`YouTube Related Error: ${error.message}`);
         return { error: 'Failed to fetch related videos' };
@@ -224,23 +231,28 @@ ipcMain.handle('search-channels', async (event, query) => {
 ipcMain.handle('get-personalized-feed', async (event, prefs) => {
     logBackend(`Fetching personalized feed for channels: ${prefs.channels.join(', ')} and topics: ${prefs.topics.join(', ')}`);
     try {
-        // Build query from both channels and topics
         const query = [...prefs.channels, ...prefs.topics].join(' ') || 'trending';
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
             params: {
                 part: 'snippet',
                 q: query,
                 type: 'video',
-                maxResults: 20,
+                maxResults: 25,
                 key: API_KEY
             }
         });
 
-        return response.data.items.map(item => ({
-            id: item.id.videoId,
-            title: item.snippet.title,
-            url: `https://www.youtube.com/watch?v=${item.id.videoId}`
-        }));
+        // Search API doesn't return contentDetails (duration), so we need a secondary call
+        const videoIds = response.data.items.map(i => i.id.videoId).join(',');
+        const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
+            params: {
+                part: 'snippet,contentDetails',
+                id: videoIds,
+                key: API_KEY
+            }
+        });
+
+        return filterAndMapVideos(detailsResponse.data.items);
     } catch (error) {
         handleApiError(error);
         return { error: 'Failed to fetch personalized feed' };
@@ -250,11 +262,14 @@ ipcMain.handle('get-personalized-feed', async (event, prefs) => {
 function filterAndMapVideos(items) {
     return items.filter(item => {
         const duration = item.contentDetails.duration;
+        // Strict Shorts Filter: Duration must include 'M' or 'H' (Minutes or Hours)
+        // Shorts are strictly under 60s (PT59S)
         const isShort = duration.startsWith('PT') && !duration.includes('M') && !duration.includes('H');
         return !isShort;
     }).map(item => ({
         id: item.id,
         title: item.snippet.title,
-        url: `https://www.youtube.com/watch?v=${item.id}`
-    })).slice(0, 10);
+        url: `https://www.youtube.com/watch?v=${item.id}`,
+        thumbnail: item.snippet.thumbnails.high.url
+    })).slice(0, 15);
 }

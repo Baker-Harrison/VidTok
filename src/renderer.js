@@ -192,7 +192,7 @@ function renderGrid(videos) {
         const card = document.createElement('div');
         card.className = 'video-card';
         card.innerHTML = `
-            <div class="thumb">
+            <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover; background-position: center;">
                 <span class="pulse">▶</span>
             </div>
             <div class="video-info">
@@ -223,7 +223,9 @@ function prependToGrid(videos) {
         card.className = 'video-card';
         card.id = `card-${video.id}`;
         card.innerHTML = `
-            <div class="thumb"><span>New</span></div>
+            <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover; background-position: center;">
+                <span>New</span>
+            </div>
             <div class="video-info">
                 <h4>${video.title}</h4>
             </div>
