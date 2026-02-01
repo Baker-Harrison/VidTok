@@ -169,7 +169,7 @@ ipcMain.handle('get-related-videos', async (event, videoId) => {
         const videoIds = response.data.items.map(i => i.id.videoId).join(',');
         const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
             params: {
-                part: 'snippet,contentDetails',
+                part: 'snippet,contentDetails,statistics',
                 id: videoIds,
                 key: API_KEY
             }
@@ -177,7 +177,7 @@ ipcMain.handle('get-related-videos', async (event, videoId) => {
 
         return filterAndMapVideos(detailsResponse.data.items);
     } catch (error) {
-        logBackend(`YouTube Related Error: ${error.message}`);
+        handleApiError(error);
         return { error: 'Failed to fetch related videos' };
     }
 });
@@ -246,7 +246,7 @@ ipcMain.handle('get-personalized-feed', async (event, prefs) => {
         const videoIds = response.data.items.map(i => i.id.videoId).join(',');
         const detailsResponse = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
             params: {
-                part: 'snippet,contentDetails',
+                part: 'snippet,contentDetails,statistics',
                 id: videoIds,
                 key: API_KEY
             }
@@ -270,6 +270,35 @@ function filterAndMapVideos(items) {
         id: item.id,
         title: item.snippet.title,
         url: `https://www.youtube.com/watch?v=${item.id}`,
-        thumbnail: item.snippet.thumbnails.high.url
+        thumbnail: item.snippet.thumbnails.high.url,
+        duration: formatDuration(item.contentDetails.duration),
+        views: formatViews(item.statistics.viewCount)
     })).slice(0, 15);
+}
+
+/**
+ * Converts ISO 8601 duration (PT1M20S) to readable (1:20)
+ */
+function formatDuration(iso) {
+    const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    const hours = parseInt(match[1]) || 0;
+    const minutes = parseInt(match[2]) || 0;
+    const seconds = parseInt(match[3]) || 0;
+    
+    const parts = [];
+    if (hours > 0) parts.push(hours);
+    parts.push(hours > 0 ? minutes.toString().padStart(2, '0') : minutes);
+    parts.push(seconds.toString().padStart(2, '0'));
+    
+    return parts.join(':');
+}
+
+/**
+ * Formats view counts (e.g. 1.2M)
+ */
+function formatViews(count) {
+    const num = parseInt(count);
+    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M views';
+    if (num >= 1000) return (num / 1000).toFixed(1) + 'K views';
+    return num + ' views';
 }

@@ -197,10 +197,11 @@ function renderGrid(videos) {
         card.className = 'video-card';
         card.innerHTML = `
             <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover; background-position: center;">
-                <span class="pulse">▶</span>
+                <span class="duration-badge">${video.duration}</span>
             </div>
             <div class="video-info">
                 <h4>${video.title}</h4>
+                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views}</p>
             </div>
         `;
         card.onclick = () => watchVideo(video);
@@ -247,10 +248,11 @@ function prependToGrid(videos) {
         card.id = `card-${video.id}`;
         card.innerHTML = `
             <div class="thumb" style="background-image: url('${video.thumbnail}'); background-size: cover; background-position: center;">
-                <span>New</span>
+                <span class="duration-badge">${video.duration}</span>
             </div>
             <div class="video-info">
                 <h4>${video.title}</h4>
+                <p style="color: #666; font-size: 0.8rem; margin-top: 5px;">${video.views}</p>
             </div>
         `;
         card.onclick = () => watchVideo(video);
