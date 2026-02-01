@@ -198,17 +198,40 @@ ipcMain.handle('get-likes', async () => {
     return await storage.getLikes();
 });
 
-ipcMain.handle('get-personalized-feed', async (event, prefs) => {
-    logBackend(`Fetching personalized feed for topics: ${prefs.topics.join(', ')}`);
+ipcMain.handle('search-channels', async (event, query) => {
     try {
-        // Search for videos based on topics
-        const query = prefs.topics.join(' ');
+        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+            params: {
+                part: 'snippet',
+                q: query,
+                type: 'channel',
+                maxResults: 5,
+                key: API_KEY
+            }
+        });
+
+        return response.data.items.map(item => ({
+            id: item.snippet.channelId,
+            title: item.snippet.title,
+            thumbnail: item.snippet.thumbnails.default.url
+        }));
+    } catch (error) {
+        handleApiError(error);
+        return { error: 'Failed to search channels' };
+    }
+});
+
+ipcMain.handle('get-personalized-feed', async (event, prefs) => {
+    logBackend(`Fetching personalized feed for channels: ${prefs.channels.join(', ')} and topics: ${prefs.topics.join(', ')}`);
+    try {
+        // Build query from both channels and topics
+        const query = [...prefs.channels, ...prefs.topics].join(' ') || 'trending';
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
             params: {
                 part: 'snippet',
                 q: query,
                 type: 'video',
-                maxResults: 15,
+                maxResults: 20,
                 key: API_KEY
             }
         });

@@ -15,7 +15,16 @@ const navForYou = document.getElementById('nav-for-you');
 const navLiked = document.getElementById('nav-liked');
 const feedTitle = document.getElementById('feed-title');
 
+const channelInput = document.getElementById('channel-input');
+const channelSuggestions = document.getElementById('channel-suggestions');
+const channelPillsContainer = document.getElementById('channel-pills');
+const topicInput = document.getElementById('topic-input');
+const topicPillsContainer = document.getElementById('topic-pills');
+
 let currentPrefs = null;
+let selectedChannels = [];
+let selectedTopics = [];
+let debounceTimer;
 
 async function checkOnboarding() {
     const prefs = await ipcRenderer.invoke('get-preferences');
@@ -25,13 +34,118 @@ async function checkOnboarding() {
     }
 }
 
-document.getElementById('finish-onboarding').onclick = async () => {
-    const channels = document.getElementById('fav-channels').value.split(',').map(s => s.trim());
-    const topics = document.getElementById('fav-topics').value.split(',').map(s => s.trim());
+/**
+ * Autocomplete for Channels
+ */
+channelInput.oninput = () => {
+    clearTimeout(debounceTimer);
+    const query = channelInput.value.trim();
     
-    if (topics.length > 0) {
-        currentPrefs = { channels, topics };
-        await ipcRenderer.invoke('save-preferences', channels, topics);
+    if (query.length < 2) {
+        channelSuggestions.style.display = 'none';
+        return;
+    }
+
+    debounceTimer = setTimeout(async () => {
+        const results = await ipcRenderer.invoke('search-channels', query);
+        if (results && !results.error) {
+            renderSuggestions(results);
+        }
+    }, 400);
+};
+
+function renderSuggestions(channels) {
+    channelSuggestions.innerHTML = '';
+    channelSuggestions.style.display = 'block';
+
+    channels.forEach(channel => {
+        const div = document.createElement('div');
+        div.className = 'suggestion';
+        div.innerHTML = `
+            <img src="${channel.thumbnail}" />
+            <span>${channel.title}</span>
+        `;
+        div.onclick = () => {
+            addPill('channel', channel.title);
+            channelInput.value = '';
+            channelSuggestions.style.display = 'none';
+        };
+        channelSuggestions.appendChild(div);
+    });
+}
+
+/**
+ * Pill Management
+ */
+function addPill(type, value) {
+    if (type === 'channel' && !selectedChannels.includes(value)) {
+        selectedChannels.push(value);
+        renderPills('channel');
+    } else if (type === 'topic' && !selectedTopics.includes(value)) {
+        selectedTopics.push(value);
+        renderPills('topic');
+    }
+}
+
+function removePill(type, value) {
+    if (type === 'channel') {
+        selectedChannels = selectedChannels.filter(v => v !== value);
+        renderPills('channel');
+    } else {
+        selectedTopics = selectedTopics.filter(v => v !== value);
+        renderPills('topic');
+    }
+}
+
+function renderPills(type) {
+    const container = type === 'channel' ? channelPillsContainer : topicPillsContainer;
+    const list = type === 'channel' ? selectedChannels : selectedTopics;
+    
+    container.innerHTML = '';
+    list.forEach(val => {
+        const pill = document.createElement('div');
+        pill.className = 'pill';
+        pill.innerHTML = `
+            <span>${val}</span>
+            <span class="remove">×</span>
+        `;
+        pill.querySelector('.remove').onclick = () => removePill(type, val);
+        container.appendChild(pill);
+    });
+}
+
+channelInput.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+        const val = channelInput.value.trim();
+        if (val) {
+            addPill('channel', val);
+            channelInput.value = '';
+            channelSuggestions.style.display = 'none';
+        }
+    }
+};
+
+// Close suggestions on outside click
+document.addEventListener('click', (e) => {
+    if (e.target !== channelInput) {
+        channelSuggestions.style.display = 'none';
+    }
+});
+
+topicInput.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+        const val = topicInput.value.trim();
+        if (val) {
+            addPill('topic', val);
+            topicInput.value = '';
+        }
+    }
+};
+
+document.getElementById('finish-onboarding').onclick = async () => {
+    if (selectedTopics.length > 0 || selectedChannels.length > 0) {
+        currentPrefs = { channels: selectedChannels, topics: selectedTopics };
+        await ipcRenderer.invoke('save-preferences', selectedChannels, selectedTopics);
         showMainView(currentPrefs);
     }
 };
