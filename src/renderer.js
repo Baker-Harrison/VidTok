@@ -130,7 +130,10 @@ closeWatch.onclick = () => { watchOverlay.style.display = 'none'; player.pause()
 // Channel Autocomplete
 channelInput.oninput = () => {
     const q = channelInput.value.trim();
-    if (q.length < 2) return;
+    if (q.length < 2) {
+        channelSuggestions.style.display = 'none';
+        return;
+    }
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
         const res = await ipcRenderer.invoke('search-channels', q);
@@ -138,21 +141,60 @@ channelInput.oninput = () => {
     }, 400);
 };
 
+channelInput.onkeydown = (e) => {
+    if (e.key === 'Enter') {
+        const val = channelInput.value.trim();
+        if (val) {
+            addPill('channel', val);
+            channelInput.value = '';
+            channelSuggestions.style.display = 'none';
+        }
+    }
+};
+
+// Close suggestions on outside click
+document.addEventListener('click', (e) => {
+    if (e.target !== channelInput) {
+        channelSuggestions.style.display = 'none';
+    }
+});
+
 function renderSuggestions(list) {
+    if (list.error) {
+        channelSuggestions.innerHTML = `<div class="suggestion" style="color: #ff4b4b;">${list.error}</div>`;
+        channelSuggestions.style.display = 'block';
+        return;
+    }
     channelSuggestions.innerHTML = '';
     channelSuggestions.style.display = 'block';
     list.forEach(c => {
         const d = document.createElement('div');
         d.className = 'suggestion';
         d.innerHTML = `<img src="${c.thumbnail}" /><span>${c.title}</span>`;
-        d.onclick = () => { addPill('channel', c.title); channelInput.value = ''; channelSuggestions.style.display = 'none'; };
+        d.onclick = () => { 
+            addPill('channel', c.title); 
+            channelInput.value = ''; 
+            channelSuggestions.style.display = 'none'; 
+        };
         channelSuggestions.appendChild(d);
     });
 }
 
 function addPill(type, val) {
+    if (!val) return;
     const list = type === 'channel' ? selectedChannels : selectedTopics;
-    if (!list.includes(val)) { list.push(val); renderPills(type); }
+    if (!list.includes(val)) { 
+        list.push(val); 
+        renderPills(type); 
+    }
+    updateFinishButton();
+}
+
+function updateFinishButton() {
+    const btn = document.getElementById('finish-onboarding');
+    const hasData = selectedChannels.length > 0 || selectedTopics.length > 0;
+    btn.style.opacity = hasData ? '1' : '0.5';
+    btn.disabled = !hasData;
 }
 
 function renderPills(type) {
