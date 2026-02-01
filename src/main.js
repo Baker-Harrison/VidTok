@@ -30,26 +30,59 @@ ipcMain.handle('get-trending-videos', async () => {
             }
         });
 
-        // Filter out Shorts (< 60s and portrait-ish)
-        // Duration is in ISO 8601 (e.g., PT1M20S)
-        const videos = response.data.items.filter(item => {
-            const duration = item.contentDetails.duration;
-            // Basic regex to exclude very short videos (usually < 1min)
-            // Shorts are usually under PT1M
-            const isShort = duration.startsWith('PT') && !duration.includes('M') && !duration.includes('H');
-            return !isShort;
-        }).map(item => ({
-            id: item.id,
-            title: item.snippet.title,
-            url: `https://www.youtube.com/watch?v=${item.id}`
-        }));
-
-        return videos.slice(0, 10);
+        return filterAndMapVideos(response.data.items);
     } catch (error) {
-        console.error('YouTube API Error:', error.response ? error.response.data : error.message);
-        return { error: 'Failed to fetch videos' };
+        handleApiError(error);
+        return { error: 'Failed to fetch trending videos' };
     }
 });
+
+ipcMain.handle('get-related-videos', async (event, videoId) => {
+    try {
+        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+            params: {
+                part: 'snippet',
+                relatedToVideoId: videoId,
+                type: 'video',
+                maxResults: 5,
+                key: API_KEY
+            }
+        });
+
+        return response.data.items.map(item => ({
+            id: item.id.videoId,
+            title: item.snippet.title,
+            url: `https://www.youtube.com/watch?v=${item.id.videoId}`
+        }));
+    } catch (error) {
+        handleApiError(error);
+        return { error: 'Failed to fetch related videos' };
+    }
+});
+
+/**
+ * Filters out short videos and maps them to a consistent format.
+ */
+function filterAndMapVideos(items) {
+    return items.filter(item => {
+        const duration = item.contentDetails.duration;
+        // Exclude videos under 60 seconds (Shorts)
+        const isShort = duration.startsWith('PT') && !duration.includes('M') && !duration.includes('H');
+        return !isShort;
+    }).map(item => ({
+        id: item.id,
+        title: item.snippet.title,
+        url: `https://www.youtube.com/watch?v=${item.id}`
+    })).slice(0, 10);
+}
+
+/**
+ * Centralized API error handling.
+ */
+function handleApiError(error) {
+    const details = error.response ? error.response.data : error.message;
+    console.error('YouTube API Error:', details);
+}
 
 app.whenReady().then(() => {
   createWindow();

@@ -1,116 +1,164 @@
+const { ipcRenderer } = require('electron');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const feed = document.getElementById('feed');
-let currentVideos = [];
+/**
+ * VidTok Renderer Logic
+ * Manages the TikTok-style vertical feed and recommendation triggers.
+ */
 
-async function downloadAndPlay(url, container) {
+const feed = document.getElementById('feed');
+let downloadedFiles = new Set();
+let observer;
+
+/**
+ * Triggers the download of a YouTube video and attaches it to the container.
+ */
+async function downloadAndPlay(video, container) {
     const pythonScript = path.join(__dirname, '../backend/streamer.py');
-    const command = `python3 "${pythonScript}" "${url}"`;
+    const command = `python3 "${pythonScript}" "${video.url}"`;
+
+    console.log(`Starting background download for: ${video.title}`);
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
-            console.error(`exec error: ${error}`);
-            container.innerHTML = `<p>Error loading video: ${error.message}</p>`;
+            console.error(`Download error for ${video.id}: ${error.message}`);
+            container.innerHTML = `<div class="error-msg">Stream unavailable</div>`;
             return;
         }
 
         try {
             const result = JSON.parse(stdout);
             if (result.error) {
-                container.innerHTML = `<p>Error: ${result.error}</p>`;
-            } else {
-                const videoPath = result.path;
-                container.innerHTML = `
-                    <div class="ui-overlay">
-                        <h3>${result.title}</h3>
-                    </div>
-                    <div class="side-bar">
-                        <div class="action-btn">❤️</div>
-                        <div class="action-btn">💬</div>
-                        <div class="action-btn">🔁</div>
-                    </div>
-                    <video src="file://${videoPath}" autoplay loop controls></video>
-                `;
-                
-                // Store path to delete later
-                currentVideos.push(videoPath);
+                container.innerHTML = `<div class="error-msg">Error: ${result.error}</div>`;
+                return;
             }
+
+            const videoPath = result.path;
+            downloadedFiles.add(videoPath);
+
+            renderVideoElement(container, result.title, videoPath, video.id);
         } catch (e) {
-            console.error('Failed to parse result:', stdout);
-            container.innerHTML = `<p>Failed to load video</p>`;
+            console.error('Failed to parse download result:', stdout);
         }
     });
 }
 
-async function loadFeed() {
-    console.log('Fetching real feed from YouTube...');
-    const videos = await ipcRenderer.invoke('get-trending-videos');
+/**
+ * Renders the actual video element and UI overlays into the container.
+ */
+function renderVideoElement(container, title, videoPath, videoId) {
+    container.innerHTML = `
+        <div class="ui-overlay">
+            <h3>${title}</h3>
+        </div>
+        <div class="side-bar">
+            <div class="action-btn like-btn" data-video-id="${videoId}">❤️</div>
+            <div class="action-btn">💬</div>
+            <div class="action-btn">🔁</div>
+        </div>
+        <video src="file://${videoPath}" autoplay loop></video>
+    `;
+
+    // Add interaction listeners
+    const likeBtn = container.querySelector('.like-btn');
+    likeBtn.onclick = () => handleInterestTrigger(videoId, 'like');
+}
+
+/**
+ * Handles user interest signals (likes, long watches).
+ */
+async function handleInterestTrigger(videoId, type) {
+    console.log(`Interest trigger: ${type} on video ${videoId}`);
     
-    if (videos.error) {
-        feed.innerHTML = `<p>Error loading feed: ${videos.error}</p>`;
+    // Fetch related content to keep the feed fresh
+    const relatedVideos = await ipcRenderer.invoke('get-related-videos', videoId);
+    
+    if (relatedVideos && !relatedVideos.error) {
+        appendVideosToFeed(relatedVideos);
+    }
+}
+
+/**
+ * Appends a list of video objects to the feed and observes them.
+ */
+function appendVideosToFeed(videos) {
+    videos.forEach(video => {
+        if (document.getElementById(`v-${video.id}`)) return; // Avoid duplicates
+
+        const container = document.createElement('div');
+        container.className = 'video-container';
+        container.id = `v-${video.id}`;
+        container.innerHTML = `<p class="buffering">Discovering...</p>`;
+        
+        feed.appendChild(container);
+        observer.observe(container);
+    });
+}
+
+/**
+ * Initializes the main trending feed.
+ */
+async function initFeed() {
+    const trending = await ipcRenderer.invoke('get-trending-videos');
+    
+    if (trending.error) {
+        feed.innerHTML = `<div class="error-msg">Global feed offline</div>`;
         return;
     }
 
     feed.innerHTML = '';
-    videos.forEach((video, index) => {
-        const container = document.createElement('div');
-        container.className = 'video-container';
-        container.id = `v-${video.id}`;
-        container.innerHTML = `
-            <div class="ui-overlay">
-                <h3>${video.title}</h3>
-            </div>
-            <p>Buffering ${video.title}...</p>
-        `;
-        feed.appendChild(container);
-        
-        // Start download/stream for the first video immediately
-        if (index === 0) {
-            downloadAndPlay(video.url, container);
-        }
-    });
-
-    // Observer to trigger download when scrolling to a new video
-    const observer = new IntersectionObserver((entries) => {
+    
+    // Initialize IntersectionObserver for lazy-loading/streaming
+    observer = new IntersectionObserver((entries) => {
         entries.forEach(entry => {
             if (entry.isIntersecting) {
                 const videoId = entry.target.id.replace('v-', '');
-                const video = videos.find(v => v.id === videoId);
+                const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
                 
-                // Analytics: track how long user stays on this video
-                let startTime = Date.now();
-                
-                if (video && !entry.target.querySelector('video')) {
-                    downloadAndPlay(video.url, entry.target);
-                }
+                // Track start time for interest detection
+                entry.target._viewStartTime = Date.now();
 
-                // If user scrolls away, calculate time spent
-                entry.target._timer = startTime;
+                if (!entry.target.querySelector('video')) {
+                    downloadAndPlay({ id: videoId, url: videoUrl, title: '' }, entry.target);
+                } else {
+                    entry.target.querySelector('video').play();
+                }
             } else {
-                if (entry.target._timer) {
-                    const timeSpent = (Date.now() - entry.target._timer) / 1000;
-                    console.log(`User spent ${timeSpent}s on ${entry.target.id}`);
-                    if (timeSpent > 30) {
-                        // "Algorithm": Fetch related content based on this video
-                        // ipcRenderer.invoke('fetch-related', videoId);
+                // Pause video when scrolled away
+                const v = entry.target.querySelector('video');
+                if (v) v.pause();
+
+                // Check if user spent enough time to signal interest
+                if (entry.target._viewStartTime) {
+                    const duration = (Date.now() - entry.target._viewStartTime) / 1000;
+                    if (duration > 20) {
+                        const videoId = entry.target.id.replace('v-', '');
+                        handleInterestTrigger(videoId, 'long_watch');
                     }
                 }
             }
         });
-    }, { threshold: 0.8 });
+    }, { threshold: 0.7 });
 
-    document.querySelectorAll('.video-container').forEach(c => observer.observe(c));
+    appendVideosToFeed(trending);
 }
 
-// Cleanup on exit
+/**
+ * Global Cleanup on application exit.
+ */
 window.onbeforeunload = () => {
-    currentVideos.forEach(v => {
-        if (fs.existsSync(v)) {
-            fs.unlinkSync(v);
+    downloadedFiles.forEach(file => {
+        if (fs.existsSync(file)) {
+            try {
+                fs.unlinkSync(file);
+            } catch (e) {
+                console.error(`Cleanup failed for ${file}:`, e);
+            }
         }
     });
 };
 
-loadFeed();
+// Start the app
+initFeed();

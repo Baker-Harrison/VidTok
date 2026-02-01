@@ -74,6 +74,16 @@
         .action-btn:hover {
             background: rgba(255,255,255,0.2);
         }
+        .buffering, .error-msg {
+            color: rgba(255,255,255,0.5);
+            font-size: 0.9rem;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
     </style>
 </head>
 <body>
