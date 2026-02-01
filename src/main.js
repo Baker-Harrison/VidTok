@@ -194,6 +194,10 @@ ipcMain.handle('save-preferences', async (event, channels, topics) => {
     return await storage.savePreferences(channels, topics);
 });
 
+ipcMain.handle('get-likes', async () => {
+    return await storage.getLikes();
+});
+
 ipcMain.handle('get-personalized-feed', async (event, prefs) => {
     logBackend(`Fetching personalized feed for topics: ${prefs.topics.join(', ')}`);
     try {

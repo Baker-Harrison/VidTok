@@ -155,8 +155,14 @@
     <!-- App Content -->
     <div id="main-view">
         <div id="sidebar">
-            <h2 style="font-size: 1.2rem; color: #fff;">VidTok Discovery</h2>
-            <p style="color: #666; font-size: 0.8rem;">Your personalized algorithm is learning from your interest.</p>
+            <h2 style="font-size: 1.2rem; color: #fff;">VidTok</h2>
+            <nav style="margin-top: 30px; display: flex; flex-direction: column; gap: 10px;">
+                <button class="nav-item active" id="nav-for-you" style="background: none; border: none; color: #fff; text-align: left; font-size: 1rem; cursor: pointer; padding: 10px; border-radius: 8px;">🏠 For You</button>
+                <button class="nav-item" id="nav-liked" style="background: none; border: none; color: #666; text-align: left; font-size: 1rem; cursor: pointer; padding: 10px; border-radius: 8px;">❤️ Liked</button>
+            </nav>
+            <div style="position: absolute; bottom: 20px; left: 20px; color: #444; font-size: 0.7rem;">
+                Algorithm active
+            </div>
         </div>
         <div id="content">
             <h3 id="feed-title">For You</h3>
