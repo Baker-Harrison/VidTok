@@ -137,6 +137,9 @@ function handleApiError(error) {
  */
 ipcMain.handle('get-trending-videos', async (event, pageToken = null) => {
     return safeApiCall(async () => {
+        const sinceTimestamp = Date.now() - (48 * 60 * 60 * 1000);
+        const viewedIds = await storage.getViewedIds(sinceTimestamp);
+        const viewedSet = new Set(viewedIds);
         const response = await axios.get('https://www.googleapis.com/youtube/v3/videos', {
             params: {
                 part: 'snippet,contentDetails,statistics',
@@ -147,8 +150,9 @@ ipcMain.handle('get-trending-videos', async (event, pageToken = null) => {
                 key: API_KEY
             }
         });
+        const filteredItems = response.data.items.filter(item => !viewedSet.has(item.id));
         return {
-            videos: filterAndMapVideos(response.data.items),
+            videos: filterAndMapVideos(filteredItems),
             nextPageToken: response.data.nextPageToken
         };
     }, 'trending feed');
@@ -192,6 +196,9 @@ ipcMain.handle('search-channels', async (e, q) => {
 
 ipcMain.handle('get-personalized-feed', async (event, prefs, pageToken = null) => {
     return safeApiCall(async () => {
+        const sinceTimestamp = Date.now() - (48 * 60 * 60 * 1000);
+        const viewedIds = await storage.getViewedIds(sinceTimestamp);
+        const viewedSet = new Set(viewedIds);
         const likes = await storage.getLikes();
         let query = [...prefs.channels, ...prefs.topics];
         
@@ -213,8 +220,10 @@ ipcMain.handle('get-personalized-feed', async (event, prefs, pageToken = null) =
         });
 
         return {
-            videos: filterAndMapVideos(detailsResponse.data.items),
+            videos: filterAndMapVideos(detailsResponse.data.items.filter(item => !viewedSet.has(item.id))),
             nextPageToken: response.data.nextPageToken
         };
     }, 'personalized feed');
 });
+
+ipcMain.handle('mark-viewed', (e, id) => storage.markViewed(id));

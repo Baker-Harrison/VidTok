@@ -4,3 +4,4 @@ dist/
 .DS_Store
 vidtok_temp/
 .env
+data/*.db

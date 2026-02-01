@@ -99,6 +99,28 @@ class Storage {
     async getLikes() {
         return await this.db.find({ type: 'like' }).sort({ timestamp: -1 });
     }
+
+    /**
+     * Marks a video as viewed with a fresh timestamp.
+     */
+    async markViewed(videoId) {
+        await this.db.update(
+            { type: 'view', videoId },
+            { $set: { type: 'view', videoId, timestamp: Date.now() } },
+            { upsert: true }
+        );
+    }
+
+    /**
+     * Returns viewed video IDs since a given timestamp.
+     */
+    async getViewedIds(sinceTimestamp) {
+        const records = await this.db.find({
+            type: 'view',
+            timestamp: { $gte: sinceTimestamp }
+        });
+        return Array.from(new Set(records.map(record => record.videoId)));
+    }
 }
 
 module.exports = new Storage();

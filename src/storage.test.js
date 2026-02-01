@@ -31,4 +31,21 @@ describe('VidTok Desktop Business Logic', () => {
         const liked = await storage.isLiked('unknown_id');
         expect(liked).toBe(false);
     });
+
+    test('Viewed videos should be stored and filtered by timestamp', async () => {
+        const idA = `view_test_a_${Date.now()}`;
+        const idB = `view_test_b_${Date.now()}`;
+        const before = Date.now();
+
+        await storage.markViewed(idA);
+        await storage.markViewed(idB);
+
+        const recentIds = await storage.getViewedIds(before - 1000);
+        expect(recentIds).toContain(idA);
+        expect(recentIds).toContain(idB);
+
+        const futureIds = await storage.getViewedIds(Date.now() + 1000);
+        expect(futureIds).not.toContain(idA);
+        expect(futureIds).not.toContain(idB);
+    });
 });

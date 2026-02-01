@@ -128,6 +128,7 @@ function renderGrid(videos, append = false) {
 async function watchVideo(video) {
     watchOverlay.style.display = 'block';
     player.src = `http://localhost:8888/stream/${video.id}`;
+    let hasMarkedViewed = false;
     
     // Load persisted volume/mute settings
     const settings = await ipcRenderer.invoke('get-settings');
@@ -140,6 +141,11 @@ async function watchVideo(video) {
 
     player.ontimeupdate = () => {
         progressBar.style.width = `${(player.currentTime / player.duration) * 100}%`;
+
+        if (!hasMarkedViewed && player.currentTime >= 5) {
+            hasMarkedViewed = true;
+            ipcRenderer.invoke('mark-viewed', video.id);
+        }
         
         // Save position every 5 seconds to reduce DB load
         if (Math.floor(player.currentTime) % 5 === 0) {
