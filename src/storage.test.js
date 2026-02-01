@@ -21,6 +21,12 @@ describe('VidTok Desktop Business Logic', () => {
         expect(settings.muted).toBe(true);
     });
 
+    test('Playback position should save and retrieve correctly', async () => {
+        await storage.savePlaybackPosition('vid_pos_test', 45.5);
+        const pos = await storage.getPlaybackPosition('vid_pos_test');
+        expect(pos).toBe(45.5);
+    });
+
     test('isLiked should return false for unknown videos', async () => {
         const liked = await storage.isLiked('unknown_id');
         expect(liked).toBe(false);

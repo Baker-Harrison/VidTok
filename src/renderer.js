@@ -134,8 +134,17 @@ async function watchVideo(video) {
     player.volume = settings.volume;
     player.muted = settings.muted;
 
+    // Load saved playback position
+    const savedPos = await ipcRenderer.invoke('get-position', video.id);
+    player.currentTime = savedPos;
+
     player.ontimeupdate = () => {
         progressBar.style.width = `${(player.currentTime / player.duration) * 100}%`;
+        
+        // Save position every 5 seconds to reduce DB load
+        if (Math.floor(player.currentTime) % 5 === 0) {
+            ipcRenderer.invoke('save-position', video.id, player.currentTime);
+        }
     };
     
     // Save volume/mute changes

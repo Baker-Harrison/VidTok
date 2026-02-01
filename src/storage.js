@@ -52,6 +52,19 @@ class Storage {
         );
     }
 
+    async savePlaybackPosition(videoId, position) {
+        await this.db.update(
+            { type: 'playback', videoId },
+            { $set: { position, timestamp: Date.now() } },
+            { upsert: true }
+        );
+    }
+
+    async getPlaybackPosition(videoId) {
+        const result = await this.db.findOne({ type: 'playback', videoId });
+        return result ? result.position : 0;
+    }
+
     /**
      * Toggles a 'like' status for a video.
      * @returns {boolean} New like status

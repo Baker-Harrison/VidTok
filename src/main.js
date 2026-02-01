@@ -177,6 +177,10 @@ ipcMain.handle('get-settings', () => storage.getSettings());
 
 ipcMain.handle('save-settings', (e, s) => storage.saveSettings(s));
 
+ipcMain.handle('save-position', (e, id, pos) => storage.savePlaybackPosition(id, pos));
+
+ipcMain.handle('get-position', (e, id) => storage.getPlaybackPosition(id));
+
 ipcMain.handle('search-channels', async (e, q) => {
     return safeApiCall(async () => {
         const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
