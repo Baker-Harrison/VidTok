@@ -121,6 +121,14 @@ class Storage {
         });
         return Array.from(new Set(records.map(record => record.videoId)));
     }
+
+    /**
+     * Returns all viewed video IDs.
+     */
+    async getAllViewedIds() {
+        const records = await this.db.find({ type: 'view' });
+        return Array.from(new Set(records.map(record => record.videoId)));
+    }
 }
 
 module.exports = new Storage();
